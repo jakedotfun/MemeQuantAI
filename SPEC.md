@@ -1,4 +1,4 @@
-# MemeQuant AI — Risk-Managed Autonomous Trading Terminal
+# 👾 MemeQuant AI — Risk-Managed Autonomous Trading Terminal
 
 > **Deploy self-sovereign AI agents that monitor, strategize, and execute on-chain trades 24/7 — with built-in risk management as the core primitive.**
 
@@ -259,7 +259,7 @@ Trading cryptocurrencies, tokens, and other digital assets involves substantial 
 - [x] Basic token safety filter (honeypot detection, holder check)
 - [x] Protocol metrics dashboard (public)
 
-### Phase 1 — Multi-Chain Expansion *(Q3 2025)*
+### Phase 1 — Multi-Chain Expansion
 - [ ] Solana chain integration
 - [ ] BNB Chain integration
 - [ ] HyperEVM integration
@@ -267,21 +267,21 @@ Trading cryptocurrencies, tokens, and other digital assets involves substantial 
 - [ ] Multi-agent portfolio management (run multiple agents simultaneously)
 - [ ] Enhanced token safety: on-chain contract analysis, liquidity lock verification
 
-### Phase 2 — Social & Copy Layer *(Q4 2025)*
+### Phase 2 — Social & Copy Layer
 - [ ] Agent performance leaderboard (on-chain, verifiable)
 - [ ] Agent-to-Agent copy trade (follow top-performing agent strategies)
 - [ ] Strategy marketplace (buy/subscribe to proven agent configurations)
 - [ ] Referral 2.0 system (F0/F1 real-time fee sharing)
 - [ ] Agent risk score system (0–100 scoring with public profiles)
 
-### Phase 3 — Advanced Intelligence *(Q1 2026)*
+### Phase 3 — Advanced Intelligence
 - [ ] Multi-signal market intelligence aggregation (on-chain + social)
 - [ ] Portfolio attribution analytics (Sharpe/Sortino proxies)
 - [ ] Advanced circuit breakers (gas spike protector, liquidity circuit breaker)
 - [ ] Natural language strategy DSL (encode complex multi-condition logic via chat)
 - [ ] Mobile application (iOS/Android)
 
-### Phase 4 — Ecosystem & Protocol *(Q2–Q3 2026)*
+### Phase 4 — Ecosystem & Protocol
 - [ ] MQA governance token (fee redistribution, parameter governance)
 - [ ] Institutional-grade risk reporting and audit trail export
 - [ ] Third-party strategy developer SDK (build and publish agent strategies)
