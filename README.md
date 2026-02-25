@@ -66,7 +66,7 @@ Unlike traditional trading bots that require users to manually configure slippag
 
 ### Why This User Matters (Market Context)
 
-Solana processes **10,000+ new token launches daily**. Platforms like pump.fun have made token creation trivially easy, creating massive retail interest. But the gap between "wanting to trade memecoins" and "successfully trading memecoins" is enormous — existing tools assume technical competence that most new users don't have.
+Solana's memecoin launchpad ecosystem processes thousands of new token launches daily. At its peak (Sep 2025), pump.fun alone saw **18,446 tokens deployed in a single day** *(LBank, Sep 2025)*. However, activity has contracted significantly — as of Feb 2026, daily launches have declined from peak levels, with graduation rates averaging ~1.15% of new launches *(Cryptopolitan, Feb 2026; Dune Analytics)*. Pump.fun retains ~95% market share of token graduations *(The Block, Oct 2025)* and has generated **$800M+ in cumulative revenue** since inception *(Wikipedia)*. Over **12.5M+ tokens** have been launched on the platform lifetime. Platforms like pump.fun have made token creation trivially easy, creating massive retail interest. But the gap between "wanting to trade memecoins" and "successfully trading memecoins" is enormous — existing tools assume technical competence that most new users don't have.
 
 Our agent targets exactly this gap: retail users who need **accessible automation and risk management** — not a power terminal, but a conversational co-pilot.
 
@@ -110,13 +110,15 @@ The #1 destroyer of retail portfolios is not bad picks — it's bad behavior. Pa
 
 ### Existing Players
 
-| Product | Chain | Users | Core Features | Key Limitation |
-|---------|-------|-------|---------------|----------------|
-| **Banana Gun** | Solana, Base, ETH | 700K+ | Sniper bot, limit orders, anti-rug, auto-sell, anti-MEV (Jito) | Rule-based only — no NLP, no pre-built strategies. Users must manually configure every parameter per trade. Steep learning curve. |
-| **Photon** | Solana, Base | 500K+ | Trading terminal, stop-loss, take-profit, copy trade | UI-heavy terminal designed for experienced traders. No conversational interface. No automation templates. |
-| **BonkBot** | Solana | 300K+ | Telegram-based buy/sell, limit orders | Text-command Telegram bot (`/buy <token>`). No intelligence layer — purely executes literal commands. No risk management. |
-| **GMGN** | Solana, Base, ETH | 200K+ | Wallet tracking, smart money signals, sniper | Analytics-first platform. Gives signals but user must still execute manually. No autonomous agent. |
-| **Maestro** | Multi-chain | 400K+ | Sniper, anti-MEV, portfolio tracking | Similar to Banana Gun — powerful but config-heavy. Targets power users who understand MEV and gas optimization. |
+| Product | Chain | Users (Lifetime) | Core Features | Key Limitation |
+|---------|-------|-------------------|---------------|----------------|
+| **Banana Gun** | Solana, Base, ETH, BNB, Sonic | 1M+ lifetime *(SecureBlitz, Feb 2025; ~12.7K weekly active wallets per Banana Gun blog, May 2025)* | Sniper bot, limit orders, anti-rug, auto-sell, anti-MEV (Jito), $16B+ total volume | Rule-based only — no NLP, no pre-built strategies. Users must manually configure every parameter per trade. Steep learning curve. |
+| **Photon** | Solana (primary), ETH, Base, Tron | 1.3M+ lifetime *(99Bitcoins, Dec 2025; $40B+ all-time volume, $421M fees generated)* | Web trading terminal, stop-loss, take-profit, Memescope, MEV protection | UI-heavy terminal designed for experienced traders. No conversational interface. No automation templates. 1% fee per tx. |
+| **BonkBot** | Solana | 519K+ lifetime *(CoinGecko/Dune, Jul 2025; $13.8B lifetime volume)* | Telegram-based buy/sell, limit orders, Jupiter routing, MEV protection | Text-command Telegram bot. No intelligence layer — purely executes literal commands. No risk management defaults. 1% fee. |
+| **GMGN** | Solana, Base, ETH | 200K+ *(estimated)* | Wallet tracking, smart money signals, sniper, cross-chain swaps | Analytics-first platform. Gives signals but user must still execute manually. No autonomous agent. |
+| **Maestro** | Multi-chain (10+ chains) | 573K+ lifetime *(CoinGecko/Dune, Jul 2025; $12.8B lifetime volume)* | Sniper, anti-MEV, portfolio tracking, Whale Bot | Similar to Banana Gun — powerful but config-heavy. $200/month premium tier. Targets power users. |
+
+> **⚠️ Data Note:** User counts are *lifetime cumulative* from Dune Analytics / official sources, not monthly active users. The memecoin market has contracted significantly from its Jan 2025 peak — weekly active wallets across all bots are ~42K–52K total (Dune, mid-2025), down from peaks of 100K+. Banana Gun reports ~10-12K weekly active wallets as of May 2025. These numbers reflect market-wide contraction, not platform-specific decline.
 
 ### Our Differentiators
 
@@ -128,7 +130,7 @@ When a new user opens the Automations tab, they see ready-to-activate playbooks 
 |----------|------------------|--------|-----------|
 | **Alpha Buy** | Volume (5m) surges ≥ 30% vs 1h avg | Buy with 2% of portfolio | Early volume spike = potential breakout signal |
 | **Momentum Sell** | Price surges ≥ 100% from entry | Sell 50% position | Lock partial profit at 2x |
-| **Duplicate Ticker Shield** | Multiple tokens share same ticker | Only buy the earliest-deployed token | Avoid copycat/scam tokens |
+| **Duplicate Ticker Shield** | Multiple tokens share same ticker | Prioritize Jupiter verified/strict list, then sort by highest LP | Avoid copycat/scam tokens — earliest deploy may be abandoned/rugged |
 | **Rug Pull Exit** | Liquidity drops ≥ 50% in 5 min | Sell 100% immediately | Liquidity removal = likely rug |
 | **Whale Follow** | Wallet in top-100 holders buys token | Buy with 1% of portfolio | Smart money signal |
 | **Stop-Loss Guard** | Price drops ≥ 20% from entry | Sell 100% position | Capital preservation |
@@ -156,7 +158,7 @@ MemeQuant:   "Buy $50 of PEPE with a 20% stop-loss"
 | GoPlus safety check (auto) | ❌ | ❌ | ❌ | ✅ Every trade |
 | Pre-trade risk scoring | ❌ | ❌ | ❌ | ✅ Block/warn on high risk |
 | Default stop-loss | ❌ Optional | ❌ Optional | ❌ None | ✅ Enforced by default |
-| Duplicate ticker protection | ❌ | ❌ | ❌ | ✅ Auto-selects earliest deploy |
+| Duplicate ticker protection | ❌ | ❌ | ❌ | ✅ Verified list + highest LP |
 
 ### Honest Positioning
 
@@ -238,10 +240,11 @@ User message (natural language)
 │  Query: "PEPE" on Solana                            │
 │  → Search Jupiter token registry by symbol          │
 │  → If multiple tokens with same ticker:             │
-│      Sort by deploy_timestamp ASC                   │
-│      Select earliest-deployed token                 │
+│      1. Filter for Jupiter verified/strict list     │
+│      2. Sort remaining by largest LP size           │
+│      3. Select top result (highest liquidity)       │
 │      Warn user: "Found 3 tokens named PEPE.         │
-│      Using the original (deployed Jan 2024)."       │
+│      Using the verified token with highest LP."     │
 │  → Return: { mint, symbol, decimals, lp_address }   │
 └─────────────────────────────────────────────────────┘
        ↓
@@ -270,7 +273,11 @@ User message (natural language)
 │     inputMint = SOL                                 │
 │     outputMint = {resolved_token_mint}              │
 │     amount = {lamports}                             │
-│     slippageBps = 300 (3%)                          │
+│     slippageBps = dynamic:                          │
+│       trade < $50  → 500 (5%)                       │
+│       trade $50-200 → 300 (3%)                      │
+│       trade > $200 → 100 (1%) + warn user           │
+│     maxTradeSize = $200 (MVP cap — no MEV protect)  │
 │                                                     │
 │  2. POST /swap                                      │
 │     Sign transaction with agent wallet keypair      │
@@ -322,9 +329,10 @@ OUTPUT:
 │           AUTOMATION ENGINE (Node.js)         │
 │                                               │
 │  WebSocket connections:                       │
-│  ├── Jupiter Price WS: real-time token prices │
+│  ├── Birdeye Price WS: real-time token prices  │
+│  │   (wss://public-api.birdeye.so/socket/solana)│
 │  ├── Helius WS: transaction monitoring        │
-│  └── Fallback: Jupiter /price polling (3s)    │
+│  └── Fallback: Jupiter /price REST polling 3s │
 │                                               │
 │  Event Loop (per price update, ~400ms):       │
 │  1. Receive new price data                    │
@@ -360,9 +368,9 @@ OUTPUT:
     type: "BUY",                 // BUY | SELL | ALERT
     params: {
       amount_pct: 2,             // 2% of portfolio
-      slippage_bps: 300,
+      slippage_bps: "dynamic",   // see dynamic slippage rules
       stop_loss_pct: 20,
-      max_position_usd: 500     // cap per-token exposure
+      max_position_usd: 200     // MVP cap: no MEV protection
     }
   },
   cooldown_seconds: 300,         // no re-trigger within 5 min
@@ -376,8 +384,9 @@ OUTPUT:
 ┌──────────────────────────────────────────────────┐
 │         PRICE MONITOR SERVICE (Node.js)           │
 │                                                   │
-│  Primary: Jupiter Price WebSocket                 │
-│  Fallback: Polling Jupiter /price API every 3s    │
+│  Primary: Birdeye WebSocket (SUBSCRIBE_PRICE) │
+│  (supports 1s intervals on Solana)            │
+│  Fallback: Jupiter /price REST API polling 3s │
 │                                                   │
 │  For each open position:                          │
 │  ┌───────────────────────────────────────────┐    │
@@ -468,7 +477,7 @@ Grid of 7 pre-built playbooks, each with:
 [Agent] → Pipeline:
          1. Claude API: parse intent → {BUY, PEPE, $50, SL 20%}
          2. Jupiter Token List: resolve PEPE mint address
-            (if duplicates → select earliest deploy, warn user)
+            (if duplicates → prioritize verified list + highest LP, warn user)
          3. GoPlus: safety check → riskScore = 15 (SAFE)
          4. Jupiter Swap: execute buy → confirm on Solana
          5. Set stop-loss automation at -20%
@@ -556,10 +565,11 @@ Score < 25  → ✅ PROCEED
 - ❌ **NLP is not perfect.** Complex multi-step instructions (e.g., "buy PEPE if it dips 10% then sell half at 2x and the rest at 5x") may be misinterpreted. MVP handles single-intent messages reliably; multi-intent requires iteration post-MVP.
 - ❌ **Automation playbooks are hypothesis-based.** "Buy on 30% volume surge" is a common heuristic in memecoin trading, but it is NOT a proven edge. Win rate is unknown without backtesting against historical data. The playbooks encode commonly-observed patterns — not guaranteed alpha.
 - ❌ **Latency is a real constraint.** Banana Gun and Photon have optimized infrastructure with dedicated RPC nodes and sub-second execution. Our MVP uses standard RPC endpoints — execution latency will be 3-5 seconds for chat-to-trade, 1.5-2.5 seconds for automation triggers. This matters in fast-moving memecoin markets.
-- ❌ **No MEV protection in MVP.** Banana Gun has anti-MEV via Jito bundles and private transactions. Our MVP submits standard Solana transactions — susceptible to sandwich attacks on large trades. For trades under $100, sandwich risk is low (attacker profit doesn't justify gas cost). For larger trades, this is a real vulnerability.
+- ❌ **No MEV protection in MVP.** Banana Gun has anti-MEV via Jito bundles and private transactions. Our MVP submits standard Solana transactions — susceptible to sandwich attacks on larger trades. **Mitigation: MVP caps max trade size at $200 and uses dynamic slippage** (5% for <$50, 3% for $50-200, 1% for >$200 with user warning). For trades under $100, sandwich risk is low (attacker profit doesn't justify gas cost). For larger trades, this is a real vulnerability — V1.5 adds Jito bundle support.
 - ❌ **Single-chain only.** Competitors like Banana Gun and Photon already support Solana + Base + ETH. MVP is Solana-only. Multi-chain is V2.0 — the architecture is designed for it, but shipping one chain well beats five chains poorly.
 - ❌ **GoPlus is not infallible.** Token safety scoring catches known rug patterns but cannot detect novel scam mechanisms. Users should still DYOR (Do Your Own Research).
 - ❌ **No copy trade in MVP.** GMGN and Photon offer wallet tracking / copy trading. Not in MVP scope.
+- ❌ **Server-side key custody is a known risk.** The MVP stores agent wallet private keys encrypted (AES-256-GCM) server-side. This is a centralization risk — if the server is compromised, all agent wallets are exposed. Production deployment requires: HSM (Hardware Security Module) for key storage, withdrawal address whitelisting, rate-limited withdrawals, and a full security audit. The MVP accepts this trade-off for hackathon velocity but it is NOT production-ready as-is.
 
 ### Competitive Honesty
 
@@ -569,16 +579,16 @@ Score < 25  → ✅ PROCEED
 
 ---
 
-## 📐 Scope Definition (2-Day Constraint)
+## 📐 Scope Definition (3-Day Constraint — Day 2 to Day 4)
 
-### ✅ In Scope (Day 2–3)
+### ✅ In Scope (Day 2–4)
 
 - **Single chain:** Solana only
 - **Agent wallet:** Generate on Solana, deposit/withdraw SOL
 - **Chat-to-trade:** Natural language → buy/sell via Jupiter Swap API
 - **Pre-built automations:** 4 playbooks — Stop-Loss Guard, Take-Profit, Alpha Buy (volume surge), Rug Pull Exit
 - **Token safety:** GoPlus API check before every trade
-- **Price monitoring:** WebSocket-based real-time price feed (Jupiter)
+- **Price monitoring:** Birdeye WebSocket real-time price feed (fallback: Jupiter REST polling)
 - **Dashboard:** Portfolio view, active positions, automation status, trade history
 - **1 happy path demo:** Chat → buy token on Solana → stop-loss triggers → auto-sell
 
@@ -599,11 +609,11 @@ Score < 25  → ✅ PROCEED
 
 ### Scope Decision Rationale
 
-**1 happy path that works end-to-end > 10 features that are half-built.** With 2 days remaining, the MVP must prove one thing: a user can chat with an AI agent, execute a real trade on Solana, and have automated risk controls (stop-loss) protect their position — all without touching a single config screen.
+**1 happy path that works end-to-end > 10 features that are half-built.** With 3 days remaining (Day 2–4), the MVP must prove one thing: a user can chat with an AI agent, execute a real trade on Solana, and have automated risk controls (stop-loss) protect their position — all without touching a single config screen. Day 4 is dedicated to testing, polish, and demo preparation.
 
 ---
 
-## 📅 Implementation Plan (2 Days)
+## 📅 Implementation Plan (3 Days — Day 2 to Day 4)
 
 ### Day 2 — Foundation + Core Trading
 
@@ -617,36 +627,51 @@ Score < 25  → ✅ PROCEED
 - Chat-to-trade backend:
   - Claude API integration for intent parsing (system prompt + JSON extraction)
   - Jupiter Swap API integration (GET /quote → POST /swap → confirmTransaction)
-  - Token resolution: Jupiter Token List API + duplicate ticker logic (earliest deploy)
+  - Token resolution: Jupiter Token List API + duplicate ticker logic (verified list + highest LP)
   - GoPlus safety check middleware (risk score calculation)
 - Unit tests: intent parsing, token resolution, safety scoring
 
 **Evening: Push to GitHub ✅**
 
-### Day 3 — Automations + Dashboard + Demo
+### Day 3 — Automations + Dashboard
 
 **Morning (4h):**
 - Automation engine:
   - Pre-built playbook definitions (4 playbooks as JSON configs)
-  - WebSocket price monitor (Jupiter Price API)
+  - Birdeye WebSocket price monitor (SUBSCRIBE_PRICE)
   - Stop-loss / take-profit execution loop
+  - Dynamic slippage logic + $200 max trade cap
   - Automation activation UI (toggle on/off per playbook, threshold sliders)
+
+**Afternoon (4h):**
 - Dashboard UI:
   - Portfolio card (total balance, positions with live PnL)
   - Active automations panel (status, last triggered, total executions)
   - Trade history table (timestamp, direction, amount, result, tx hash)
+- Withdraw flow: agent wallet → user wallet
+- End-to-end integration test: chat → buy → position appears → stop-loss triggers
 
-**Afternoon (4h):**
-- End-to-end happy path test:
+**Evening: Push to GitHub ✅**
+
+### Day 4 — Polish + Demo Prep + Testing
+
+**Morning (4h):**
+- End-to-end happy path testing:
   - Chat "buy $10 of [token]" → agent executes → position appears in dashboard
   - Price drops → stop-loss triggers → auto-sell → trade logged in history
   - Verify: GoPlus blocks a honeypot token (test with known scam address)
-- Withdraw flow: agent wallet → user wallet
-- UI polish: loading states, error handling, responsive design
-- Seed demo data: 10-15 realistic trades for presentation
-- Risk disclaimers visible in UI
+  - Test edge cases: duplicate tickers, insufficient balance, high-risk token
+- UI polish: loading states, error handling, empty states, responsive design
 
-**Evening: Final push to GitHub ✅**
+**Afternoon (4h):**
+- Seed demo data: 10-15 realistic trades for presentation
+- Risk disclaimers visible in all relevant UI
+- Practice demo run (2x full walk-through)
+- Fix any bugs found during practice run
+- Final screenshots / recording backup
+- Deploy to Vercel (frontend) + Railway (backend) for live demo
+
+**Evening: Final push to GitHub ✅ — Ready for presentation**
 
 ---
 
@@ -654,12 +679,12 @@ Score < 25  → ✅ PROCEED
 
 | Section | Duration | Content |
 |---------|----------|---------|
-| **Problem** | 1.5 min | "Solana launches 10,000+ new tokens daily. Retail users are flooding in. But the tools — Banana Gun, Photon — are built for power users. Config screens, slippage settings, MEV toggles. The next wave of users won't learn all that." |
+| **Problem** | 1.5 min | "Pump.fun has launched 12.5M+ tokens on Solana since Jan 2024. Retail users are flooding in. But the tools — Banana Gun, Photon — are built for power users. Config screens, slippage settings, MEV toggles. The next wave of users won't learn all that." |
 | **Solution** | 1 min | "MemeQuant AI: an AI agent you talk to in plain English. It trades for you on Solana, with pre-built risk automations that protect your capital. The agent that survives first, profits second." |
 | **Live Demo** | 6 min | Open dashboard → Connect Phantom → Deposit SOL → Chat: "Buy $10 of [token]" → Agent executes (show NLP parsing + GoPlus check + Jupiter swap) → Position appears in portfolio → Show active automations (stop-loss ON) → Price drops → Stop-loss triggers → Auto-sell → Trade logged in history → Withdraw funds |
 | **Competitive Edge** | 1.5 min | Side-by-side: Banana Gun needs 5 config steps. We need one sentence. Show automation library — 7 playbooks, one click each. |
 | **Honest Assessment** | 1 min | "Playbooks are hypotheses — volume surge buy is a pattern, not a proven edge. Banana Gun wins on speed and MEV. We're not competing on infra — we're competing on UX for the next million non-technical users." |
-| **Tech Deep Dive** | 1 min | "Chat → Claude API → structured JSON → GoPlus safety (risk score formula) → Jupiter swap. Stop-loss on WebSocket with < 2s trigger-to-execution." |
+| **Tech Deep Dive** | 1 min | "Chat → Claude API → structured JSON → GoPlus safety (risk score formula) → Jupiter swap with dynamic slippage + $200 max cap. Stop-loss on Birdeye WebSocket with < 2s trigger-to-execution." |
 | **Roadmap** | 1 min | V1.5: MEV protection (Jito) + backtest playbooks. V2.0: Multi-chain + copy trade. V3.0: Mobile. |
 | **Q&A** | 5-8 min | See Prepared Q&A section |
 
@@ -675,7 +700,7 @@ A: Banana Gun is a power tool — fast execution, MEV protection, multi-chain. E
 
 **Q: "How does chat-to-trade actually work technically?"**
 
-A: User message → Claude API with structured system prompt → returns JSON with intent, token, amount, conditions → we resolve the token via Jupiter Token List API (handling duplicate tickers by selecting earliest deploy) → GoPlus safety check scores 4 factors: honeypot (weight 40), mint authority (25), holder concentration (20), liquidity (15) → if risk score < 50, Jupiter Swap API executes → confirm on Solana RPC → record in DB. Total pipeline: 3-5 seconds. If AI confidence < 80%, it asks a clarifying question instead of guessing.
+A: User message → Claude API with structured system prompt → returns JSON with intent, token, amount, conditions → we resolve the token via Jupiter Token List API (handling duplicate tickers by filtering for Jupiter verified/strict list first, then sorting by highest liquidity pool size) → GoPlus safety check scores 4 factors: honeypot (weight 40), mint authority (25), holder concentration (20), liquidity (15) → if risk score < 50, Jupiter Swap API executes → confirm on Solana RPC → record in DB. Total pipeline: 3-5 seconds. If AI confidence < 80%, it asks a clarifying question instead of guessing.
 
 **Q: "What if the AI misunderstands the message?"**
 
@@ -687,11 +712,11 @@ A: We don't — and we're transparent about that. These playbooks encode commonl
 
 **Q: "What about MEV / sandwich attacks?"**
 
-A: Honest answer — the MVP does not have MEV protection. We submit standard Solana transactions. For small trades (< $100), sandwich risk is low because attacker profit doesn't justify the cost. For larger trades, this is a real vulnerability. V1.5 roadmap includes Jito bundle integration for private transaction submission — the industry standard on Solana. Banana Gun already has this; we acknowledge they're ahead on infrastructure.
+A: Honest answer — the MVP does not have MEV protection. We submit standard Solana transactions. We mitigate this with: (1) max trade size cap of $200 in MVP, and (2) dynamic slippage — 5% for <$50, 3% for $50-200, 1% for >$200 with user warning. For small trades (< $100), sandwich risk is low because attacker profit doesn't justify the cost. V1.5 roadmap includes Jito bundle integration for private transaction submission — the industry standard on Solana. Banana Gun already has this; we acknowledge they're ahead on infrastructure.
 
 **Q: "Why Solana only?"**
 
-A: Two-day constraint. Solana has the highest memecoin trading volume, the most active new token launches (~10,000+/day), and Jupiter provides the best DEX aggregator API. We chose depth over breadth. Multi-chain is V2.0 — the architecture supports it, but shipping one chain well beats five chains poorly.
+A: Two-day constraint. Solana has the highest memecoin trading volume, 12.5M+ tokens launched on pump.fun alone, and Jupiter provides the best DEX aggregator API. We chose depth over breadth. Multi-chain is V2.0 — the architecture supports it, but shipping one chain well beats five chains poorly.
 
 **Q: "What's the execution latency?"**
 
@@ -731,7 +756,7 @@ Top-performing agent strategy templates available for purchase or subscription. 
 
 | Phase | Features | Est. Time | Gate |
 |-------|----------|-----------|------|
-| **MVP** | Solana: Chat-to-trade + 4 playbooks + stop-loss + GoPlus | 2 days | **Current sprint** |
+| **MVP** | Solana: Chat-to-trade + 4 playbooks + stop-loss + GoPlus + dynamic slippage | 3 days | **Current sprint** |
 | **V1.5** | MEV protection (Jito bundles) + DCA engine + trailing stop-loss | 1 week | — |
 | **V1.5** | **Backtest all playbooks** against 30+ days Solana data | 1 week | **Must complete before any win rate claims** |
 | **V2.0** | Multi-chain: Base + ETH integration | 2 weeks | — |
@@ -752,7 +777,7 @@ Top-performing agent strategy templates available for purchase or subscription. 
 | **AI / NLP** | Claude API (Anthropic) | Intent extraction, strategy formalization, pre-trade reasoning |
 | **On-Chain Execution** | @solana/web3.js + Jupiter Swap API v6 | Solana-native, best DEX aggregator on Solana |
 | **Token Safety** | GoPlus Security API | Industry-standard honeypot/rug detection |
-| **Price Data** | Jupiter Price API (WebSocket + REST fallback) | Real-time price monitoring for automations |
+| **Price Data** | Birdeye WebSocket API (primary) + Jupiter REST API (fallback) | Birdeye provides real-time WebSocket price streaming for Solana (SUBSCRIBE_PRICE, 1s intervals). Jupiter REST as fallback — Jupiter does not offer a public WebSocket for price feeds. |
 | **Agent Wallet** | Solana Keypair + AES-256-GCM encryption | Self-sovereign agent wallet, server-side key management |
 | **Frontend** | Next.js 14, Tailwind CSS, Solana Wallet Adapter | Fast setup, Phantom/Solflare integration |
 | **Backend** | Node.js + Express | Lightweight, real-time capable (WebSocket) |
@@ -783,5 +808,7 @@ Top-performing agent strategy templates available for purchase or subscription. 
 <div align="center">
 
 **MemeQuant AI** — *The agent that survives first, profits second.*
+
+🦞💎🚀
 
 </div>
