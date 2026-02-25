@@ -135,6 +135,9 @@ When a new user opens the Automations tab, they see ready-to-activate playbooks 
 | **Whale Follow** | Wallet in top-100 holders buys token | Buy with 1% of portfolio | Smart money signal |
 | **Stop-Loss Guard** | Price drops ≥ 20% from entry | Sell 100% position | Capital preservation |
 | **New Token Snipe** | Token deployed < 60s ago + LP added | Buy with 0.5% of portfolio | Early entry on new launches |
+| **Smart Money Alert** | Top-100 profitable trader buys > threshold | Alert + auto-buy with 1% of portfolio | Follow proven profitable wallets for signal confirmation |
+| **Pump.fun Graduation Snipe** | Token completes bonding curve → migrates to Raydium | Auto-buy within 30s of migration | Graduation = passed initial liquidity test, momentum signal |
+| **Concentrated Sell Protection** | Whale holding > threshold % of token supply starts selling | Auto-sell 100% immediately | Large holder dumping crashes price, exit before impact |
 
 Users activate playbooks with one click, customize thresholds, or combine multiple playbooks into a strategy stack. No other Solana trading bot provides this.
 
@@ -191,7 +194,7 @@ Every trade is evaluated against the agent's **Risk Constitution** before execut
 | **Token Safety Threshold** | Risk score < 50 | GoPlus safety check — block trades on high-risk tokens |
 
 ### 📋 Pre-Built Automation Playbooks
-7 ready-to-activate playbooks (see Competitive Landscape section for full list). Users activate with one click, customize thresholds, or stack multiple playbooks.
+10 ready-to-activate playbooks (see Competitive Landscape section for full list). Users activate with one click, customize thresholds, or stack multiple playbooks.
 
 ### 🔍 Token Safety Analysis (GoPlus)
 Automatic pre-trade safety check on every buy:
@@ -442,7 +445,7 @@ The central command stream. Users interact with agents in natural language. Live
 Dedicated UI module for configuring the agent's Risk Constitution. Visual sliders, threshold inputs, and a real-time **Risk Score (0–100)** indicator showing how aggressive/conservative the current configuration is.
 
 ### Automation Playbooks Panel
-Grid of 7 pre-built playbooks, each with:
+Grid of 10 pre-built playbooks, each with:
 - Toggle ON/OFF switch
 - Customizable threshold sliders
 - Last triggered timestamp
@@ -586,7 +589,7 @@ Score < 25  → ✅ PROCEED
 - **Single chain:** Solana only
 - **Agent wallet:** Generate on Solana, deposit/withdraw SOL
 - **Chat-to-trade:** Natural language → buy/sell via Jupiter Swap API
-- **Pre-built automations:** 4 playbooks — Stop-Loss Guard, Take-Profit, Alpha Buy (volume surge), Rug Pull Exit
+- **Pre-built automations:** 10 playbooks — Stop-Loss Guard, Take-Profit, Alpha Buy, Rug Pull Exit, Momentum Sell, Duplicate Ticker Shield, Whale Follow, New Token Snipe, Smart Money Alert, Pump.fun Graduation Snipe, Concentrated Sell Protection
 - **Token safety:** GoPlus API check before every trade
 - **Price monitoring:** Birdeye WebSocket real-time price feed (fallback: Jupiter REST polling)
 - **Dashboard:** Portfolio view, active positions, automation status, trade history
@@ -637,7 +640,7 @@ Score < 25  → ✅ PROCEED
 
 **Morning (4h):**
 - Automation engine:
-  - Pre-built playbook definitions (4 playbooks as JSON configs)
+  - Pre-built playbook definitions (10 playbooks as JSON configs)
   - Birdeye WebSocket price monitor (SUBSCRIBE_PRICE)
   - Stop-loss / take-profit execution loop
   - Dynamic slippage logic + $200 max trade cap
@@ -682,7 +685,7 @@ Score < 25  → ✅ PROCEED
 | **Problem** | 1.5 min | "Pump.fun has launched 12.5M+ tokens on Solana since Jan 2024. Retail users are flooding in. But the tools — Banana Gun, Photon — are built for power users. Config screens, slippage settings, MEV toggles. The next wave of users won't learn all that." |
 | **Solution** | 1 min | "MemeQuant AI: an AI agent you talk to in plain English. It trades for you on Solana, with pre-built risk automations that protect your capital. The agent that survives first, profits second." |
 | **Live Demo** | 6 min | Open dashboard → Connect Phantom → Deposit SOL → Chat: "Buy $10 of [token]" → Agent executes (show NLP parsing + GoPlus check + Jupiter swap) → Position appears in portfolio → Show active automations (stop-loss ON) → Price drops → Stop-loss triggers → Auto-sell → Trade logged in history → Withdraw funds |
-| **Competitive Edge** | 1.5 min | Side-by-side: Banana Gun needs 5 config steps. We need one sentence. Show automation library — 7 playbooks, one click each. |
+| **Competitive Edge** | 1.5 min | Side-by-side: Banana Gun needs 5 config steps. We need one sentence. Show automation library — 10 playbooks, one click each. |
 | **Honest Assessment** | 1 min | "Playbooks are hypotheses — volume surge buy is a pattern, not a proven edge. Banana Gun wins on speed and MEV. We're not competing on infra — we're competing on UX for the next million non-technical users." |
 | **Tech Deep Dive** | 1 min | "Chat → Claude API → structured JSON → GoPlus safety (risk score formula) → Jupiter swap with dynamic slippage + $200 max cap. Stop-loss on Birdeye WebSocket with < 2s trigger-to-execution." |
 | **Roadmap** | 1 min | V1.5: MEV protection (Jito) + backtest playbooks. V2.0: Multi-chain + copy trade. V3.0: Mobile. |
@@ -756,7 +759,7 @@ Top-performing agent strategy templates available for purchase or subscription. 
 
 | Phase | Features | Est. Time | Gate |
 |-------|----------|-----------|------|
-| **MVP** | Solana: Chat-to-trade + 4 playbooks + stop-loss + GoPlus + dynamic slippage | 3 days | **Current sprint** |
+| **MVP** | Solana: Chat-to-trade + 10 playbooks + stop-loss + GoPlus + dynamic slippage | 3 days | **Current sprint** |
 | **V1.5** | MEV protection (Jito bundles) + DCA engine + trailing stop-loss | 1 week | — |
 | **V1.5** | **Backtest all playbooks** against 30+ days Solana data | 1 week | **Must complete before any win rate claims** |
 | **V2.0** | Multi-chain: Base + ETH integration | 2 weeks | — |
