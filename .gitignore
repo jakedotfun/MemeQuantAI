@@ -33,6 +33,11 @@ Thumbs.db
 *.swp
 *.swo
 
+# Server
+server/database/*.db
+server/database/*.db-wal
+server/database/*.db-shm
+
 # Misc
 *.tsbuildinfo
 next-env.d.ts
