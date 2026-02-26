@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   TrendingUp,
   ArrowUpRight,
@@ -13,6 +13,7 @@ import {
   Zap,
   ShieldAlert,
 } from "lucide-react";
+import api from "@/lib/api";
 
 interface Playbook {
   id: string;
@@ -221,6 +222,19 @@ interface PlaybookState {
   threshold: number;
 }
 
+// Map frontend playbook IDs to backend playbook IDs
+const backendIdMap: Record<string, string> = {
+  "alpha-buy": "alpha_buy",
+  "momentum-sell": "momentum_sell",
+  "rug-exit": "rug_pull_exit",
+  "whale-follow": "whale_follow",
+  "stop-loss": "stop_loss_guard",
+  "new-token-snipe": "new_token_snipe",
+  "smart-money-alert": "smart_money_alert",
+  "pumpfun-graduation": "pumpfun_graduation",
+  "concentrated-sell-protection": "concentrated_sell_protection",
+};
+
 export default function AutomationsTab() {
   const [states, setStates] = useState<Record<string, PlaybookState>>(() => {
     const init: Record<string, PlaybookState> = {};
@@ -230,11 +244,58 @@ export default function AutomationsTab() {
     return init;
   });
 
-  const toggle = (id: string) =>
+  // Sync with backend on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await api.getUserAutomations("DemoUser123");
+        if (data.automations && data.automations.length > 0) {
+          setStates((prev) => {
+            const next = { ...prev };
+            for (const auto of data.automations) {
+              // Find the frontend ID for this backend playbook_id
+              const frontendId = Object.entries(backendIdMap).find(
+                ([, v]) => v === auto.playbook_id
+              )?.[0];
+              if (frontendId && next[frontendId]) {
+                next[frontendId] = {
+                  ...next[frontendId],
+                  enabled: auto.enabled === 1,
+                };
+              }
+            }
+            return next;
+          });
+        }
+      } catch {
+        // Backend offline — keep defaults
+      }
+    })();
+  }, []);
+
+  const toggle = useCallback(async (id: string) => {
+    const currentlyEnabled = states[id]?.enabled;
+    // Optimistic UI update
     setStates((prev) => ({
       ...prev,
       [id]: { ...prev[id], enabled: !prev[id].enabled },
     }));
+
+    const backendId = backendIdMap[id];
+    if (!backendId) return;
+
+    try {
+      if (currentlyEnabled) {
+        await api.deactivatePlaybook("DemoUser123", backendId);
+      } else {
+        await api.activatePlaybook("DemoUser123", backendId, {
+          threshold_pct: states[id]?.threshold,
+        });
+      }
+    } catch {
+      // Backend offline — keep optimistic state
+    }
+  }, [states]);
 
   const setThreshold = (id: string, value: number) =>
     setStates((prev) => ({

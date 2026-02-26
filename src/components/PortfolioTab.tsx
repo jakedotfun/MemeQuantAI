@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Shield, Activity, Package, AlertTriangle, Sparkles, Info, Wallet, Copy, Check, ArrowUpRight } from "lucide-react";
+import api from "@/lib/api";
 
 const statCards = [
   { label: "Total Value", value: "$0.00" },
@@ -104,7 +105,7 @@ function CopyAddr({ address }: { address: string }) {
   );
 }
 
-function DepositCard() {
+function DepositCard({ address }: { address: string }) {
   return (
     <div className="bg-bg-card rounded-xl border border-border p-5">
       <div className="flex items-center gap-2 mb-1">
@@ -115,8 +116,8 @@ function DepositCard() {
       <div className="bg-bg-secondary rounded-lg p-3">
         <span className="text-text-secondary text-[11px] block mb-1.5">Solana (SOL / USDC)</span>
         <div className="flex items-center gap-1.5">
-          <span className="text-white text-xs font-mono break-all">7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU</span>
-          <CopyAddr address="7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU" />
+          <span className="text-white text-xs font-mono break-all">{address}</span>
+          <CopyAddr address={address} />
         </div>
       </div>
     </div>
@@ -129,6 +130,73 @@ export default function PortfolioTab() {
     riskParams.forEach((p) => { init[p.key] = p.defaultValue; });
     return init;
   });
+  const [liveStats, setLiveStats] = useState(statCards);
+  const [liveActivity, setLiveActivity] = useState(activityFeed);
+  const [liveTrades, setLiveTrades] = useState(recentTrades);
+  const [walletAddress, setWalletAddress] = useState("7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU");
+
+  // Fetch portfolio from backend
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await api.getPortfolio("DemoUser123");
+        if (data.portfolio) {
+          const p = data.portfolio;
+          setLiveStats([
+            { label: "Total Value", value: `$${(p.balance?.sol * 150 || 0).toFixed(2)}` },
+            {
+              label: "PnL Today",
+              value: `${p.dailyPnl >= 0 ? "+" : ""}$${(p.dailyPnl || 0).toFixed(2)}`,
+              color: p.dailyPnl >= 0 ? "text-positive" : "text-negative",
+            },
+            { label: "Win Rate", value: "0%" },
+            { label: "Active Positions", value: String(p.totalOpenPositions || 0) },
+          ]);
+
+          if (p.closedTrades && p.closedTrades.length > 0) {
+            setLiveTrades(
+              p.closedTrades.map((t: Record<string, string | number | boolean>) => ({
+                token: t.token_symbol || "???",
+                side: t.side || "BUY",
+                amount: `$${t.amount_usd || 0}`,
+                entry: `$${t.entry_price || 0}`,
+                exit: `$${t.exit_price || 0}`,
+                pnl: `${Number(t.pnl_pct) >= 0 ? "+" : ""}${Number(t.pnl_pct || 0).toFixed(1)}%`,
+                pnlPositive: Number(t.pnl_pct) >= 0,
+                time: t.closed_at ? String(t.closed_at) : "",
+              }))
+            );
+          }
+        }
+      } catch {
+        // Backend offline — keep mock data
+      }
+
+      try {
+        const data = await api.getActivityLog("DemoUser123", 10);
+        if (data.activities && data.activities.length > 0) {
+          setLiveActivity(
+            data.activities.map((a: Record<string, string>) => ({
+              text: `${a.title}: ${a.description}`,
+              type: a.type === "AUTO_SELL" ? "risk" as const : a.type === "AUTOMATION" ? "info" as const : "trade" as const,
+              time: a.created_at || "",
+            }))
+          );
+        }
+      } catch {
+        // keep mock
+      }
+
+      try {
+        const walletData = await api.getWallet("DemoUser123");
+        if (walletData.wallet?.publicKey) {
+          setWalletAddress(walletData.wallet.publicKey);
+        }
+      } catch {
+        // keep mock address
+      }
+    })();
+  }, []);
 
   const risk = computeRiskScore(values);
 
@@ -139,7 +207,7 @@ export default function PortfolioTab() {
     <div className="h-full overflow-auto p-6 space-y-6">
       {/* Stat Cards */}
       <div className="grid grid-cols-4 gap-4">
-        {statCards.map((card) => (
+        {liveStats.map((card) => (
           <div key={card.label} className="bg-bg-card rounded-xl border border-border p-4">
             <p className="text-text-secondary text-xs mb-1">{card.label}</p>
             <p className={`text-xl font-semibold ${card.color || "text-white"}`}>{card.value}</p>
@@ -148,7 +216,7 @@ export default function PortfolioTab() {
       </div>
 
       {/* Deposit */}
-      <DepositCard />
+      <DepositCard address={walletAddress} />
 
       {/* Risk Constitution */}
       <div className="bg-bg-card rounded-xl border border-border p-5">
@@ -247,7 +315,7 @@ export default function PortfolioTab() {
           <h2 className="text-white font-semibold text-sm">Agent Activity</h2>
         </div>
         <div className="space-y-0">
-          {activityFeed.map((item, i) => (
+          {liveActivity.map((item, i) => (
             <div
               key={i}
               className={`flex items-start justify-between py-2.5 border-b border-border/50 last:border-b-0 pl-3 border-l-2 ${
@@ -301,7 +369,7 @@ export default function PortfolioTab() {
               </tr>
             </thead>
             <tbody>
-              {recentTrades.map((trade, i) => (
+              {liveTrades.map((trade, i) => (
                 <tr key={i} className="border-t border-border/50">
                   <td className="py-2.5 font-semibold text-white">{trade.token}</td>
                   <td className="py-2.5">

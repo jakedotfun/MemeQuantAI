@@ -7,8 +7,10 @@ import {
   CheckCircle2,
   Copy,
   Check,
+  Loader2,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
+import api from "@/lib/api";
 
 interface DeployModalProps {
   onClose: () => void;
@@ -66,6 +68,8 @@ function ChainIcon({ letter, color }: { letter: string; color: string }) {
 export default function DeployModal({ onClose, onDone }: DeployModalProps) {
   const [step, setStep] = useState<Step>(1);
   const [agentName, setAgentName] = useState("");
+  const [walletAddress, setWalletAddress] = useState("7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAs");
+  const [deploying, setDeploying] = useState(false);
 
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (step === 2) return;
@@ -114,10 +118,23 @@ export default function DeployModal({ onClose, onDone }: DeployModalProps) {
                   Cancel
                 </button>
                 <button
-                  onClick={() => setStep(2)}
-                  className="flex-1 py-2.5 bg-accent hover:bg-accent/90 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1"
+                  disabled={deploying}
+                  onClick={async () => {
+                    setDeploying(true);
+                    try {
+                      const data = await api.createWallet("DemoUser123");
+                      if (data.wallet?.publicKey) {
+                        setWalletAddress(data.wallet.publicKey);
+                      }
+                    } catch {
+                      // Backend offline — use fallback address
+                    }
+                    setDeploying(false);
+                    setStep(2);
+                  }}
+                  className="flex-1 py-2.5 bg-accent hover:bg-accent/90 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1 disabled:opacity-50"
                 >
-                  Next <ChevronRight size={14} />
+                  {deploying ? <><Loader2 size={14} className="animate-spin" /> Deploying...</> : <>Next <ChevronRight size={14} /></>}
                 </button>
               </div>
             </div>
@@ -134,7 +151,7 @@ export default function DeployModal({ onClose, onDone }: DeployModalProps) {
               <CopyableAddress
                 label="Solana Wallet (SOL / SPL Tokens)"
                 icons={<ChainIcon letter="S" color="bg-purple-500" />}
-                address="7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAs"
+                address={walletAddress}
               />
 
               <ul className="space-y-1.5 text-text-secondary text-xs leading-relaxed">

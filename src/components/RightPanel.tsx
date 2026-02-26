@@ -2,13 +2,14 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Send, ChevronRight, ChevronLeft } from "lucide-react";
+import api from "@/lib/api";
 
 interface Message {
   role: "user" | "agent";
   content: string[];
 }
 
-const buyPipelineSteps = [
+const fallbackPipelineSteps = [
   "\ud83d\udd0d Token Resolution: Found 3 tokens named PEPE \u2192 Selected verified token with highest LP ($2.1M)",
   "\ud83d\udee1\ufe0f GoPlus Safety: Score 15/100 (SAFE) \u2014 No honeypot, mint authority revoked, top-10 holders: 32%",
   "\u26a1 Slippage: 3% (trade $50-200 range) | Max trade cap: $200",
@@ -77,14 +78,11 @@ export default function RightPanel({
     const userMsg: Message = { role: "user", content: [pendingBuyMessage] };
     setMessages((prev) => [...prev, userMsg]);
 
-    if (isBuyMessage(pendingBuyMessage)) {
-      streamBuyResponse(buyPipelineSteps);
-    }
-
+    sendToBackend(pendingBuyMessage);
     onPendingBuyConsumed?.();
   }, [pendingBuyMessage]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const streamBuyResponse = (steps: string[]) => {
+  const streamSteps = (steps: string[]) => {
     steps.forEach((step, i) => {
       setTimeout(() => {
         setMessages((prev) => {
@@ -101,6 +99,27 @@ export default function RightPanel({
     });
   };
 
+  const sendToBackend = async (message: string) => {
+    try {
+      const data = await api.chat("DemoUser123", message);
+      if (data.steps && data.steps.length > 0) {
+        streamSteps(data.steps);
+      } else if (data.reply) {
+        setMessages((prev) => [...prev, { role: "agent", content: [data.reply] }]);
+      } else {
+        // Fallback for unexpected response shape
+        streamSteps(isBuyMessage(message) ? fallbackPipelineSteps : ["I received your message but couldn't process it. Please try again."]);
+      }
+    } catch {
+      // Backend down — use mock fallback
+      if (isBuyMessage(message)) {
+        streamSteps(fallbackPipelineSteps);
+      } else {
+        setMessages((prev) => [...prev, { role: "agent", content: ["Backend is offline. Using demo mode.\n\nI can simulate trades for you — try saying \"buy $50 of PEPE\"."] }]);
+      }
+    }
+  };
+
   const handleSend = () => {
     const trimmed = input.trim();
     if (!trimmed || sendingRef.current) return;
@@ -112,9 +131,7 @@ export default function RightPanel({
     setMessages((prev) => [...prev, { role: "user", content: [trimmed] }]);
     setInput("");
 
-    if (isBuyMessage(trimmed)) {
-      streamBuyResponse(buyPipelineSteps);
-    }
+    sendToBackend(trimmed);
 
     setTimeout(() => { sendingRef.current = false; }, 100);
   };
