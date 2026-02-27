@@ -133,12 +133,14 @@ WORKFLOW for transfers:
 3. Report the EXACT result from the tool
 
 CRITICAL RULES:
-1. Tool results are the ONLY source of truth. Report exactly what they return.
+1. Tool results are the ONLY source of truth. Report EXACTLY what they return.
 2. If a tool returns status "SUCCESS" with a txHash → show that EXACT hash and Solscan link.
-3. If a tool returns status "FAILED" → tell the user it failed with the EXACT error.
-4. NEVER fabricate transaction hashes. You cannot create them.
-5. NEVER simulate tool calls with XML tags or fake function calls.
-6. Always use search_token BEFORE execute_swap to get the correct mint address.
+3. If a tool returns status "FAILED" → tell the user it FAILED with the EXACT error message.
+4. NEVER fabricate transaction hashes. You CANNOT create valid Solana tx hashes.
+5. NEVER claim a transaction succeeded if the tool returned "FAILED".
+6. NEVER simulate tool calls with XML tags or fake function calls.
+7. Always use search_token BEFORE execute_swap to get the correct mint address.
+8. If a tool result has no txHash or txHash is null → the transaction DID NOT happen. Tell the user.
 
 SAFETY: GoPlus security data is included in search_token results.
 - If safetyLevel is "BLOCK" (score > 80): REFUSE the trade, explain the risks.
@@ -438,22 +440,52 @@ async function handleExecuteTransfer(
   const symbol = tokenSymbol || (tokenMint ? tokenMint.slice(0, 6) + "..." : "SOL");
 
   console.log("[TOOL:execute_transfer] ═══════════════════════════════════");
+  console.log("[TOOL:execute_transfer] walletAddress:", walletAddress || "EMPTY!");
   console.log("[TOOL:execute_transfer] To:", recipient, "Amount:", amount, tokenMint ? `Token: ${tokenMint}` : "SOL");
 
-  const result = await executeTransfer({
-    walletAddress,
-    toAddress: recipient,
-    amount,
-    tokenMint: tokenMint || undefined,
-    tokenDecimals: tokenDecimals ?? undefined,
-  });
+  // Validate inputs before calling executeTransfer
+  if (!walletAddress) {
+    console.error("[TOOL:execute_transfer] FAIL: No wallet address. Agent not deployed.");
+    return {
+      status: "FAILED",
+      error: "No wallet address. The user must deploy their agent first before transferring.",
+      txHash: null,
+      solscanUrl: null,
+    };
+  }
+  if (!recipient) {
+    return { status: "FAILED", error: "No recipient address provided.", txHash: null, solscanUrl: null };
+  }
+  if (!amount || amount <= 0) {
+    return { status: "FAILED", error: "Transfer amount must be greater than 0.", txHash: null, solscanUrl: null };
+  }
 
-  console.log("[TOOL:execute_transfer] RESULT:", result.status);
-  if (result.txHash) console.log("[TOOL:execute_transfer] REAL TX HASH:", result.txHash);
-  if (result.error) console.log("[TOOL:execute_transfer] ERROR:", result.error);
+  let result;
+  try {
+    result = await executeTransfer({
+      walletAddress,
+      toAddress: recipient,
+      amount,
+      tokenMint: tokenMint || undefined,
+      tokenDecimals: tokenDecimals ?? undefined,
+    });
+  } catch (err) {
+    console.error("[TOOL:execute_transfer] UNHANDLED THROW:", err);
+    return {
+      status: "FAILED",
+      error: `Transfer crashed: ${err instanceof Error ? err.message : String(err)}`,
+      txHash: null,
+      solscanUrl: null,
+    };
+  }
+
+  console.log("[TOOL:execute_transfer] ── FINAL RESULT ──");
+  console.log("[TOOL:execute_transfer] status:", result.status);
+  console.log("[TOOL:execute_transfer] txHash:", result.txHash || "NONE");
+  console.log("[TOOL:execute_transfer] error:", result.error || "NONE");
 
   // Log transfer in activity
-  if (result.status === "SUCCESS") {
+  if (result.status === "SUCCESS" && result.txHash) {
     saveTrade({
       walletAddress,
       token: symbol,
@@ -462,7 +494,7 @@ async function handleExecuteTransfer(
       amountSol: tokenMint ? 0 : amount,
       amountUsd: 0,
       entryPrice: "0",
-      txHash: result.txHash ?? "",
+      txHash: result.txHash,
       solscanUrl: result.solscanUrl ?? "",
       status: "SUCCESS",
       recipient,

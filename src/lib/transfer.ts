@@ -135,7 +135,7 @@ async function executeSolTransfer(
 
   // Step 4: Build transaction
   console.log("[TRANSFER] Step 4: Building transaction...");
-  let txHash: string;
+  let txHash: string | undefined;
   try {
     const transaction = new Transaction().add(
       SystemProgram.transfer({
@@ -198,8 +198,8 @@ async function executeSolTransfer(
     // (we cannot verify it landed, so never claim success)
     return {
       status: "FAILED",
-      txHash: typeof txHash! === "string" ? txHash! : undefined,
-      solscanUrl: typeof txHash! === "string" ? `https://solscan.io/tx/${txHash!}` : undefined,
+      txHash: txHash || undefined,
+      solscanUrl: txHash ? `https://solscan.io/tx/${txHash}` : undefined,
       error: `SOL transfer failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }

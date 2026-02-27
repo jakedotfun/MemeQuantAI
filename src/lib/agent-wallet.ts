@@ -6,6 +6,15 @@ import { join } from "path";
 const DATA_DIR = join(process.cwd(), "server", "data");
 const WALLETS_FILE = join(DATA_DIR, "wallets.json");
 
+// Log resolved path once on first import
+let _pathLogged = false;
+function logWalletPath() {
+  if (_pathLogged) return;
+  _pathLogged = true;
+  console.log("[WALLET] Resolved wallets path:", WALLETS_FILE);
+  console.log("[WALLET] File exists:", existsSync(WALLETS_FILE));
+}
+
 interface WalletData {
   secretKey: number[];
   agentName: string;
@@ -57,12 +66,18 @@ export function generateAgentWallet(agentName?: string): { publicKey: string } {
 }
 
 export function getAgentKeypair(walletAddress: string): Keypair | null {
+  logWalletPath();
+
   // Check in-memory cache first
   const cached = walletStore.get(walletAddress);
-  if (cached) return cached;
+  if (cached) {
+    console.log("[WALLET] Keypair found in memory cache for:", walletAddress);
+    return cached;
+  }
 
   // Fall back to disk
   const wallets = readWallets();
+  console.log("[WALLET] Loaded", Object.keys(wallets).length, "wallets from disk. Looking for:", walletAddress);
   const entry = wallets[walletAddress];
   if (!entry) return null;
 
