@@ -1,6 +1,15 @@
 import { DEXSCREENER_API, JUPITER_API } from "../utils/constants.js";
 import { EventEmitter } from "events";
 
+/** Headers for Jupiter API calls */
+function jupiterHeaders() {
+  const headers = {};
+  if (process.env.JUPITER_API_KEY) {
+    headers["x-api-key"] = process.env.JUPITER_API_KEY;
+  }
+  return headers;
+}
+
 class PriceService extends EventEmitter {
   constructor() {
     super();
@@ -52,14 +61,15 @@ class PriceService extends EventEmitter {
 
     for (const tokenMint of this.watchedTokens) {
       try {
-        // Use Jupiter price API
+        // Use Jupiter price API v3
         const response = await fetch(
-          `https://api.jup.ag/price/v2?ids=${tokenMint}`
+          `https://api.jup.ag/price/v3?ids=${tokenMint}`,
+          { headers: jupiterHeaders() }
         );
         const data = await response.json();
 
-        if (data.data && data.data[tokenMint]) {
-          const price = parseFloat(data.data[tokenMint].price);
+        if (data[tokenMint]) {
+          const price = parseFloat(data[tokenMint].usdPrice);
           const oldPrice = this.prices.get(tokenMint)?.price;
 
           this.prices.set(tokenMint, {

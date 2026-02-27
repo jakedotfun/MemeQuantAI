@@ -1,57 +1,82 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
-import { Search, Zap } from "lucide-react";
-import { getSearchTokens, type SearchToken } from "@/data/tokens";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Search, Zap, RefreshCw } from "lucide-react";
 import TokenIcon from "@/components/TokenIcon";
+import CopyAddress from "@/components/CopyAddress";
+import { searchMarketTokens, fetchTrendingTokens, type MarketToken } from "@/lib/dexscreener";
+import { fmtCurrency, fmtPrice } from "@/lib/format";
+
+function colorFromSymbol(symbol: string): string {
+  let hash = 0;
+  for (let i = 0; i < symbol.length; i++) {
+    hash = symbol.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return `hsl(${Math.abs(hash) % 360}, 70%, 50%)`;
+}
 
 function SearchTokenRow({
   token,
   onSelect,
   onBuy,
 }: {
-  token: SearchToken;
+  token: MarketToken;
   onSelect: (symbol: string) => void;
   onBuy: (symbol: string) => void;
 }) {
-  const positive = token.h24 >= 0;
+  const change = token.priceChangeH24;
+  const positive = change !== null && change >= 0;
   return (
     <button
       onClick={() => onSelect(token.symbol)}
       className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/[0.04] transition-colors text-left group"
     >
-      <TokenIcon symbol={token.symbol} color={token.color} name={token.name} size={32} />
+      <TokenIcon
+        symbol={token.symbol}
+        color={colorFromSymbol(token.symbol)}
+        name={token.name}
+        imageUrl={token.imageUrl ?? undefined}
+        size={32}
+      />
 
       {/* Name + ticker */}
-      <div className="min-w-0 w-28 flex-shrink-0">
-        <p className="text-white text-sm font-semibold truncate">{token.symbol}</p>
-        <p className="text-text-secondary text-xs truncate">{token.name}</p>
+      <div className="min-w-0 w-28 flex-shrink-0 flex items-center gap-1">
+        <div>
+          <p className="text-white text-sm font-semibold truncate">{token.symbol}</p>
+          <p className="text-text-secondary text-xs truncate">{token.name}</p>
+        </div>
+        <CopyAddress address={token.tokenAddress} size={11} />
       </div>
 
-      {/* Age / CA / Holders */}
+      {/* Contract address */}
       <div className="hidden md:flex flex-col text-[11px] text-text-secondary min-w-0 w-32 flex-shrink-0">
-        <span>{token.age} old</span>
-        <span className="truncate font-mono">{token.contractAddress.slice(0, 4)}...{token.contractAddress.slice(-4)} &middot; {token.holders} holders</span>
+        <span className="truncate font-mono">
+          {token.tokenAddress.slice(0, 4)}...{token.tokenAddress.slice(-4)}
+        </span>
       </div>
 
       {/* Stats */}
       <div className="flex items-center gap-4 ml-auto text-xs text-right flex-shrink-0">
         <div className="hidden lg:block">
           <p className="text-text-secondary">MC</p>
-          <p className="text-white font-medium">{token.mcap}</p>
+          <p className="text-white font-medium">{fmtCurrency(token.marketCap)}</p>
         </div>
         <div className="hidden lg:block">
           <p className="text-text-secondary">VOL</p>
-          <p className="text-white font-medium">{token.volume}</p>
+          <p className="text-white font-medium">{fmtCurrency(token.volumeH24)}</p>
         </div>
         <div className="hidden sm:block">
           <p className="text-text-secondary">LIQ</p>
-          <p className="text-white font-medium">{token.liquidity}</p>
+          <p className="text-white font-medium">{fmtCurrency(token.liquidityUsd)}</p>
+        </div>
+        <div>
+          <p className="text-text-secondary">PRICE</p>
+          <p className="text-white font-medium">{fmtPrice(token.priceUsd)}</p>
         </div>
         <div>
           <p className="text-text-secondary">24H</p>
           <p className={positive ? "text-positive font-medium" : "text-negative font-medium"}>
-            {positive ? "+" : ""}{token.h24.toFixed(1)}%
+            {change !== null ? `${positive ? "+" : ""}${change.toFixed(1)}%` : "\u2014"}
           </p>
         </div>
       </div>
@@ -81,19 +106,55 @@ export default function SearchModal({
   onBuyToken: (symbol: string) => void;
 }) {
   const [query, setQuery] = useState("");
+  const [results, setResults] = useState<MarketToken[]>([]);
+  const [trending, setTrending] = useState<MarketToken[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [trendingLoading, setTrendingLoading] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
-  const allTokens = useMemo(() => getSearchTokens(), []);
+  const searchVersionRef = useRef(0);
 
-  const filtered = useMemo(() => {
-    if (!query.trim()) return allTokens;
-    const q = query.trim().toLowerCase();
-    return allTokens.filter(
-      (t) =>
-        t.name.toLowerCase().includes(q) ||
-        t.symbol.toLowerCase().includes(q) ||
-        t.contractAddress.toLowerCase().includes(q)
-    );
-  }, [query, allTokens]);
+  // Load trending tokens on mount
+  useEffect(() => {
+    fetchTrendingTokens()
+      .then((tokens) => setTrending(tokens.slice(0, 20)))
+      .catch(() => {})
+      .finally(() => setTrendingLoading(false));
+  }, []);
+
+  // Debounced search
+  const doSearch = useCallback((q: string) => {
+    const trimmed = q.trim();
+    if (!trimmed) {
+      setResults([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    const version = ++searchVersionRef.current;
+
+    const timer = setTimeout(async () => {
+      try {
+        const tokens = await searchMarketTokens(trimmed);
+        if (searchVersionRef.current === version) {
+          setResults(tokens);
+          setLoading(false);
+        }
+      } catch {
+        if (searchVersionRef.current === version) {
+          setResults([]);
+          setLoading(false);
+        }
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const cleanup = doSearch(query);
+    return cleanup;
+  }, [query, doSearch]);
 
   // Auto-focus
   useEffect(() => {
@@ -108,6 +169,10 @@ export default function SearchModal({
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
+
+  const isSearching = query.trim().length > 0;
+  const displayTokens = isSearching ? results : trending;
+  const isLoading = isSearching ? loading : trendingLoading;
 
   return (
     <div
@@ -135,27 +200,32 @@ export default function SearchModal({
         {/* Section label */}
         <div className="px-4 py-2 border-b border-border/50">
           <span className="text-text-secondary text-xs font-medium">
-            {query.trim() ? "Results" : "24h Trending"}
+            {isSearching ? "Results" : "Trending"}
           </span>
-          {query.trim() && (
+          {isSearching && !isLoading && (
             <span className="text-text-secondary text-xs ml-2">
-              ({filtered.length})
+              ({results.length})
             </span>
           )}
         </div>
 
         {/* Token list */}
         <div className="flex-1 overflow-auto">
-          {filtered.length === 0 ? (
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center py-12 text-text-secondary">
+              <RefreshCw size={24} className="mb-3 text-accent animate-spin" />
+              <p className="text-sm">{isSearching ? "Searching..." : "Loading trending tokens..."}</p>
+            </div>
+          ) : displayTokens.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-text-secondary">
               <Search size={32} className="mb-3 opacity-30" />
-              <p className="text-sm">No tokens found</p>
+              <p className="text-sm">No tokens found on Solana</p>
               <p className="text-xs mt-1">Try a different search term</p>
             </div>
           ) : (
-            filtered.map((token) => (
+            displayTokens.map((token) => (
               <SearchTokenRow
-                key={token.symbol}
+                key={token.tokenAddress + token.pairAddress}
                 token={token}
                 onSelect={onSelectToken}
                 onBuy={onBuyToken}

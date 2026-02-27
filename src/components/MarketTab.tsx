@@ -1,14 +1,82 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { Search, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
 import TokenIcon from "@/components/TokenIcon";
-import { useMarketTokens } from "@/hooks/useMarketTokens";
+import CopyAddress from "@/components/CopyAddress";
+import { useMarketTokens, PAGE_SIZE } from "@/hooks/useMarketTokens";
 import { fmtCurrency, fmtPrice, fmtNumber, fmtAge } from "@/lib/format";
 import type { MarketToken, FilterTab, Timeframe } from "@/lib/dexscreener";
+import { fetchTokenSafety, type SafetyResult } from "@/lib/token-safety";
 
 const filters: FilterTab[] = ["Trending", "Top", "Gainers", "New Pairs"];
 const timeframes: Timeframe[] = ["1H", "24H", "7D", "1M"];
+
+/** Tiny colored dot showing safety level. */
+function SafetyDot({ level }: { level?: SafetyResult["level"] }) {
+  if (!level) return null;
+  const cls = level === "SAFE" ? "bg-positive"
+    : level === "WARN" ? "bg-yellow-400"
+    : level === "HIGH" ? "bg-orange-400"
+    : "bg-negative";
+  const title = level === "SAFE" ? "Low Risk"
+    : level === "WARN" ? "Medium Risk"
+    : level === "HIGH" ? "High Risk"
+    : "Scam";
+  return <div className={`w-2 h-2 rounded-full flex-shrink-0 ${cls}`} title={title} />;
+}
+
+/** Batch-fetch safety data for visible tokens (with caching). */
+function useSafetyBatch(tokens: MarketToken[]) {
+  const [safetyMap, setSafetyMap] = useState<Record<string, SafetyResult>>({});
+  const cacheRef = useRef<Record<string, SafetyResult>>({});
+
+  useEffect(() => {
+    if (tokens.length === 0) return;
+
+    // Only fetch tokens not already cached
+    const toFetch = tokens.filter((t) => !cacheRef.current[t.tokenAddress]);
+    if (toFetch.length === 0) {
+      // All cached, just update state
+      const map: Record<string, SafetyResult> = {};
+      for (const t of tokens) {
+        if (cacheRef.current[t.tokenAddress]) map[t.tokenAddress] = cacheRef.current[t.tokenAddress];
+      }
+      setSafetyMap(map);
+      return;
+    }
+
+    let cancelled = false;
+
+    // Fetch in batches of 5 to avoid overwhelming the API
+    async function fetchBatch() {
+      for (let i = 0; i < toFetch.length; i += 5) {
+        if (cancelled) return;
+        const batch = toFetch.slice(i, i + 5);
+        const results = await Promise.allSettled(
+          batch.map((t) => fetchTokenSafety(t.tokenAddress, t.pairCreatedAt > 0 ? t.pairCreatedAt : undefined)),
+        );
+        if (cancelled) return;
+
+        const newEntries: Record<string, SafetyResult> = {};
+        results.forEach((r, idx) => {
+          if (r.status === "fulfilled") {
+            const addr = batch[idx].tokenAddress;
+            cacheRef.current[addr] = r.value;
+            newEntries[addr] = r.value;
+          }
+        });
+
+        setSafetyMap((prev) => ({ ...prev, ...newEntries }));
+      }
+    }
+
+    fetchBatch();
+    return () => { cancelled = true; };
+  }, [tokens]);
+
+  return safetyMap;
+}
 
 function PctCell({ value }: { value: number | null }) {
   if (value === null) return <span className="text-text-secondary">{"\u2014"}</span>;
@@ -33,10 +101,12 @@ export default function MarketTab({
   onSearchClick,
   highlightedToken,
   onTokenClick,
+  portfolioUsdValue = 0,
 }: {
   onSearchClick: () => void;
   highlightedToken: string | null;
   onTokenClick: (token: MarketToken) => void;
+  portfolioUsdValue?: number;
 }) {
   const {
     tokens,
@@ -55,6 +125,7 @@ export default function MarketTab({
     setActiveTimeframe,
   } = useMarketTokens();
 
+  const safetyMap = useSafetyBatch(tokens);
   const highlightRef = useRef<HTMLTableRowElement>(null);
 
   // Scroll highlighted row into view
@@ -145,7 +216,7 @@ export default function MarketTab({
         <div className="flex items-center gap-1.5 bg-bg-card rounded-md px-2.5 py-1 border border-border flex-shrink-0">
           <div className="w-1.5 h-1.5 rounded-full bg-positive" />
           <span className="text-text-secondary text-[11px] hidden lg:inline">Portfolio:</span>
-          <span className="text-white text-[11px] font-semibold font-mono">$1,234.56</span>
+          <span className="text-white text-[11px] font-semibold font-mono">${portfolioUsdValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
         </div>
       </div>
 
@@ -163,7 +234,7 @@ export default function MarketTab({
       {error && tokens.length === 0 && (
         <div className="flex-1 flex items-center justify-center">
           <div className="flex flex-col items-center gap-3">
-            <span className="text-negative text-sm">{error}</span>
+            <span className="text-negative text-sm">Unable to load tokens. Try again.</span>
             <button
               onClick={retry}
               className="px-3 py-1.5 bg-accent text-white text-xs rounded-md hover:bg-accent/80 transition-colors"
@@ -196,7 +267,7 @@ export default function MarketTab({
             <tbody>
               {tokens.map((token, idx) => {
                 const isHighlighted = highlightedToken === token.symbol;
-                const rank = (page - 1) * 20 + idx + 1;
+                const rank = (page - 1) * PAGE_SIZE + idx + 1;
                 return (
                   <tr
                     key={token.tokenAddress}
@@ -211,6 +282,7 @@ export default function MarketTab({
                     <td className="py-3 px-4 text-text-secondary">{rank}</td>
                     <td className="py-3 px-2">
                       <div className="flex items-center gap-2.5">
+                        <SafetyDot level={safetyMap[token.tokenAddress]?.level} />
                         <TokenIcon
                           symbol={token.symbol}
                           color={colorFromSymbol(token.symbol)}
@@ -218,6 +290,7 @@ export default function MarketTab({
                           imageUrl={token.imageUrl ?? undefined}
                         />
                         <span className="font-semibold text-white">{token.symbol}</span>
+                        <CopyAddress address={token.tokenAddress} />
                       </div>
                     </td>
                     <td className="py-3 px-2 text-right text-white text-xs">{fmtPrice(token.priceUsd)}</td>
@@ -248,7 +321,7 @@ export default function MarketTab({
       {/* Empty state (no results after search) */}
       {!loading && !error && tokens.length === 0 && searchQuery.trim() && (
         <div className="flex-1 flex items-center justify-center">
-          <span className="text-text-secondary text-sm">No tokens match &ldquo;{searchQuery}&rdquo;</span>
+          <span className="text-text-secondary text-sm">No tokens found on Solana</span>
         </div>
       )}
 
@@ -285,7 +358,7 @@ export default function MarketTab({
             Next <ChevronRight size={13} />
           </button>
           <span className="text-text-secondary text-[11px] ml-2">
-            Showing pairs {(page - 1) * 20 + 1}-{Math.min(page * 20, totalFiltered)} of {totalFiltered}
+            Showing pairs {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, totalFiltered)} of {totalFiltered}
           </span>
         </div>
       )}

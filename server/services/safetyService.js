@@ -1,4 +1,4 @@
-import { GOPLUS_API } from "../utils/constants.js";
+const GOPLUS_API = "https://api.gopluslabs.io/api/v1";
 
 // Check token safety using GoPlus API
 export async function checkTokenSafety(tokenMint) {

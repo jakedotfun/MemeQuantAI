@@ -1,4 +1,4 @@
-import { Keypair, Connection, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { Keypair, Connection, PublicKey, LAMPORTS_PER_SOL, Transaction, SystemProgram, sendAndConfirmTransaction } from "@solana/web3.js";
 import { encrypt, decrypt } from "../utils/encryption.js";
 import db from "../database/db.js";
 import { SOLANA_RPC_URL } from "../utils/constants.js";
@@ -61,4 +61,27 @@ export async function getAgentBalance(userAddress) {
   };
 }
 
-export default { createAgentWallet, getAgentWallet, getAgentKeypair, getAgentBalance };
+// Transfer SOL from agent wallet to another address
+export async function transferSOL(userAddress, toAddress, amountSol) {
+  const keypair = getAgentKeypair(userAddress);
+
+  const transaction = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: keypair.publicKey,
+      toPubkey: new PublicKey(toAddress),
+      lamports: Math.floor(amountSol * LAMPORTS_PER_SOL)
+    })
+  );
+
+  const signature = await sendAndConfirmTransaction(connection, transaction, [keypair]);
+
+  return {
+    success: true,
+    signature,
+    amount: amountSol,
+    from: keypair.publicKey.toBase58(),
+    to: toAddress
+  };
+}
+
+export default { createAgentWallet, getAgentWallet, getAgentKeypair, getAgentBalance, transferSOL };

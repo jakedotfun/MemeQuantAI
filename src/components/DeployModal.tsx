@@ -10,11 +10,9 @@ import {
   Loader2,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import api from "@/lib/api";
-
 interface DeployModalProps {
   onClose: () => void;
-  onDone: (agentName: string) => void;
+  onDone: (agentName: string, walletAddress: string) => void;
 }
 
 type Step = 1 | 2;
@@ -68,7 +66,7 @@ function ChainIcon({ letter, color }: { letter: string; color: string }) {
 export default function DeployModal({ onClose, onDone }: DeployModalProps) {
   const [step, setStep] = useState<Step>(1);
   const [agentName, setAgentName] = useState("");
-  const [walletAddress, setWalletAddress] = useState("7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAs");
+  const [walletAddress, setWalletAddress] = useState("");
   const [deploying, setDeploying] = useState(false);
 
   const handleOverlayClick = (e: React.MouseEvent) => {
@@ -122,15 +120,18 @@ export default function DeployModal({ onClose, onDone }: DeployModalProps) {
                   onClick={async () => {
                     setDeploying(true);
                     try {
-                      const data = await api.createWallet("DemoUser123");
-                      if (data.wallet?.publicKey) {
-                        setWalletAddress(data.wallet.publicKey);
+                      const res = await fetch("/api/wallet/create", { method: "POST" });
+                      const data = await res.json();
+                      if (data.publicKey) {
+                        setWalletAddress(data.publicKey);
+                        setStep(2);
+                      } else {
+                        alert(data.error || "Failed to create wallet. Please try again.");
                       }
                     } catch {
-                      // Backend offline — use fallback address
+                      alert("Failed to create wallet. Please try again.");
                     }
                     setDeploying(false);
-                    setStep(2);
                   }}
                   className="flex-1 py-2.5 bg-accent hover:bg-accent/90 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1 disabled:opacity-50"
                 >
@@ -161,7 +162,7 @@ export default function DeployModal({ onClose, onDone }: DeployModalProps) {
               </ul>
 
               <button
-                onClick={() => onDone(agentName.trim())}
+                onClick={() => onDone(agentName.trim(), walletAddress)}
                 className="w-full py-2.5 bg-accent hover:bg-accent/90 text-white rounded-lg text-sm font-medium transition-colors"
               >
                 Done

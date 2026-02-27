@@ -1,8 +1,25 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Shield, Activity, Package, AlertTriangle, Sparkles, Info, Wallet, Copy, Check, ArrowUpRight } from "lucide-react";
-import api from "@/lib/api";
+import { Shield, Activity, Package, AlertTriangle, Sparkles, Info, Wallet, Copy, Check, ArrowUpRight, KeyRound, X } from "lucide-react";
+import CopyAddress from "@/components/CopyAddress";
+
+interface TradeRecord {
+  id: string;
+  walletAddress: string;
+  token: string;
+  tokenMint: string;
+  side: "BUY" | "SELL" | "TRANSFER";
+  amountSol: number;
+  amountUsd: number;
+  entryPrice: string;
+  txHash: string;
+  solscanUrl: string;
+  timestamp: string;
+  status: "SUCCESS" | "FAILED";
+  recipient?: string;
+  transferAmount?: number;
+}
 
 const statCards = [
   { label: "Total Value", value: "$0.00" },
@@ -58,54 +75,189 @@ function riskBarColor(score: number): string {
   return "bg-negative";
 }
 
-interface Trade {
+interface DisplayTrade {
   token: string;
-  side: "BUY" | "SELL";
+  side: "BUY" | "SELL" | "TRANSFER";
   amount: string;
-  entry: string;
-  exit: string;
+  entryPrice: number;
+  currentPrice: number;
   pnl: string;
   pnlPositive: boolean;
   time: string;
+  txHash: string;
+  solscanUrl: string;
 }
 
-const recentTrades: Trade[] = [
-  { token: "PEPE", side: "BUY", amount: "$50", entry: "$0.00001234", exit: "$0.00001580", pnl: "+$14.02", pnlPositive: true, time: "2h ago" },
-  { token: "WIF", side: "SELL", amount: "$100", entry: "$2.45", exit: "$2.21", pnl: "-$9.80", pnlPositive: false, time: "5h ago" },
-  { token: "BONK", side: "BUY", amount: "$30", entry: "$0.0000312", exit: "$0.0000401", pnl: "+$8.56", pnlPositive: true, time: "1d ago" },
-  { token: "POPCAT", side: "SELL", amount: "$60", entry: "$1.12", exit: "$0.98", pnl: "-$7.50", pnlPositive: false, time: "2d ago" },
-  { token: "MOODENG", side: "BUY", amount: "$40", entry: "$0.0521", exit: "$0.0634", pnl: "+$8.67", pnlPositive: true, time: "3d ago" },
-  { token: "GOAT", side: "BUY", amount: "$25", entry: "$0.892", exit: "$1.024", pnl: "+$3.70", pnlPositive: true, time: "3d ago" },
-];
+interface ActivityItem {
+  text: string;
+  type: "trade" | "info";
+  time: string;
+}
 
-const activityFeed = [
-  { text: "\u26d4 Blocked: SCAM token \u2014 GoPlus risk score 85 (honeypot detected)", type: "blocked" as const, time: "8 min ago" },
-  { text: "\u26a0\ufe0f DOGE trade paused \u2014 daily drawdown limit reached (-15.2%)", type: "warning" as const, time: "25 min ago" },
-  { text: "Stop-loss triggered on WIF at -20%", type: "risk" as const, time: "45 min ago" },
-  { text: "Bought $50 of PEPE via chat command", type: "trade" as const, time: "1h ago" },
-  { text: "\ud83d\udee1\ufe0f Duplicate ticker: Found 3 PEPE tokens \u2192 selected verified with highest LP ($2.1M)", type: "info" as const, time: "1h ago" },
-  { text: "Rug Pull Exit: sold FWOG (liquidity -62%)", type: "risk" as const, time: "3h ago" },
-  { text: "Bought $30 of BONK via chat command", type: "trade" as const, time: "5h ago" },
-];
+function formatTimeAgo(isoString: string): string {
+  const diff = Date.now() - new Date(isoString).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
-function CopyAddr({ address }: { address: string }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = () => {
-    navigator.clipboard.writeText(address);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+function FormatSmallPrice({ price }: { price: number }) {
+  if (!price || price === 0) return <span>$0</span>;
+  if (price >= 1) return <span>${price.toFixed(2)}</span>;
+  if (price >= 0.01) return <span>${price.toFixed(4)}</span>;
+  const str = price.toFixed(20).replace(/0+$/, "");
+  const match = str.match(/^0\.(0*)/);
+  if (!match) return <span>${price.toFixed(6)}</span>;
+  const zeros = match[1].length;
+  const significant = str.replace(/^0\.0*/, "").slice(0, 4);
   return (
-    <button
-      onClick={handleCopy}
-      className="p-1.5 text-text-secondary hover:text-white transition-colors flex-shrink-0"
-    >
-      {copied ? <Check size={13} className="text-positive" /> : <Copy size={13} />}
-    </button>
+    <span>$0.0<sub className="text-[9px] opacity-70">{zeros}</sub>{significant}</span>
   );
 }
 
-function DepositCard({ address }: { address: string }) {
+
+function ExportKeyModal({ onClose, walletAddress }: { onClose: () => void; walletAddress: string }) {
+  const [confirmed, setConfirmed] = useState(false);
+  const [privateKey, setPrivateKey] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleExport = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/wallet/export-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress }),
+      });
+      const data = await res.json();
+      if (data.privateKey) {
+        setPrivateKey(data.privateKey);
+      } else {
+        setError(data.error || "Failed to export key");
+      }
+    } catch {
+      setError("Cannot export key. Please try again.");
+    }
+    setLoading(false);
+  };
+
+  const handleCopy = () => {
+    if (privateKey) {
+      navigator.clipboard.writeText(privateKey);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="bg-bg-card border border-border rounded-2xl w-full max-w-md mx-4">
+        <div className="flex items-center justify-between p-5 border-b border-border">
+          <h2 className="text-white font-semibold text-lg flex items-center gap-2">
+            <AlertTriangle size={18} className="text-yellow-400" />
+            Export Private Key
+          </h2>
+          <button onClick={onClose} className="text-text-secondary hover:text-white transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {!privateKey ? (
+            <>
+              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
+                <p className="text-yellow-300 text-sm font-medium mb-3">
+                  Your private key gives FULL ACCESS to your agent wallet. Anyone with this key can steal all your funds.
+                </p>
+                <ul className="space-y-2 text-yellow-200/80 text-xs">
+                  <li className="flex items-start gap-2">
+                    <span className="mt-1 w-1 h-1 rounded-full bg-yellow-400 flex-shrink-0" />
+                    Never share your private key with anyone
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="mt-1 w-1 h-1 rounded-full bg-yellow-400 flex-shrink-0" />
+                    Never paste it on any website
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="mt-1 w-1 h-1 rounded-full bg-yellow-400 flex-shrink-0" />
+                    Store it securely offline
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="mt-1 w-1 h-1 rounded-full bg-yellow-400 flex-shrink-0" />
+                    Use it to import your wallet into Phantom or Solflare
+                  </li>
+                </ul>
+              </div>
+
+              <label className="flex items-start gap-2.5 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={confirmed}
+                  onChange={(e) => setConfirmed(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-border bg-bg-secondary accent-accent cursor-pointer"
+                />
+                <span className="text-text-secondary text-xs group-hover:text-white transition-colors">
+                  I understand the risks and want to proceed
+                </span>
+              </label>
+
+              {error && <p className="text-negative text-xs">{error}</p>}
+
+              <div className="flex gap-3">
+                <button
+                  onClick={onClose}
+                  className="flex-1 py-2.5 bg-bg-secondary hover:bg-white/5 text-text-secondary hover:text-white border border-border rounded-lg text-sm font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={!confirmed || loading}
+                  onClick={handleExport}
+                  className="flex-1 py-2.5 bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500/40 text-yellow-300 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {loading ? "Exporting..." : "Export Key"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-text-secondary text-xs">Your private key (click to copy):</p>
+              <div
+                onClick={handleCopy}
+                className="bg-bg-secondary rounded-lg p-3 border border-border cursor-pointer hover:border-accent/50 transition-colors"
+              >
+                <p className="text-white text-[11px] font-mono break-all leading-relaxed">{privateKey}</p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleCopy}
+                  className="flex-1 py-2.5 bg-accent/10 hover:bg-accent/20 border border-accent/30 text-accent rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-1.5"
+                >
+                  {copied ? <><Check size={14} /> Copied!</> : <><Copy size={14} /> Copy Key</>}
+                </button>
+                <button
+                  onClick={onClose}
+                  className="flex-1 py-2.5 bg-bg-secondary hover:bg-white/5 text-text-secondary hover:text-white border border-border rounded-lg text-sm font-medium transition-colors"
+                >
+                  Done
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DepositCard({ address, onExportKey }: { address: string; onExportKey: () => void }) {
   return (
     <div className="bg-bg-card rounded-xl border border-border p-5">
       <div className="flex items-center gap-2 mb-1">
@@ -117,91 +269,218 @@ function DepositCard({ address }: { address: string }) {
         <span className="text-text-secondary text-[11px] block mb-1.5">Solana (SOL / USDC)</span>
         <div className="flex items-center gap-1.5">
           <span className="text-white text-xs font-mono break-all">{address}</span>
-          <CopyAddr address={address} />
+          <CopyAddress address={address} />
         </div>
       </div>
+      <button
+        onClick={onExportKey}
+        className="mt-3 flex items-center gap-1.5 text-text-secondary hover:text-white text-xs transition-colors"
+      >
+        <KeyRound size={12} />
+        Export Private Key
+      </button>
     </div>
   );
 }
 
-export default function PortfolioTab() {
+export default function PortfolioTab({
+  agentDeployed = false,
+  onDeployClick,
+  walletAddress = "",
+  portfolioUsdValue = 0,
+  walletTokenCount = 0,
+  onRefreshBalance,
+}: {
+  agentDeployed?: boolean;
+  onDeployClick?: () => void;
+  walletAddress?: string;
+  portfolioUsdValue?: number;
+  walletTokenCount?: number;
+  onRefreshBalance?: () => void;
+}) {
   const [values, setValues] = useState<Record<string, number>>(() => {
     const init: Record<string, number> = {};
     riskParams.forEach((p) => { init[p.key] = p.defaultValue; });
     return init;
   });
   const [liveStats, setLiveStats] = useState(statCards);
-  const [liveActivity, setLiveActivity] = useState(activityFeed);
-  const [liveTrades, setLiveTrades] = useState(recentTrades);
-  const [walletAddress, setWalletAddress] = useState("7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU");
+  const [liveActivity, setLiveActivity] = useState<ActivityItem[]>([]);
+  const [liveTrades, setLiveTrades] = useState<DisplayTrade[]>([]);
+  const [showExportKey, setShowExportKey] = useState(false);
 
-  // Fetch portfolio from backend
+  // Refresh balance on mount when tab opens
   useEffect(() => {
+    onRefreshBalance?.();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch trades and compute PnL / Win Rate stats
+  useEffect(() => {
+    if (!walletAddress) return;
+    let cancelled = false;
+
     (async () => {
-      try {
-        const data = await api.getPortfolio("DemoUser123");
-        if (data.portfolio) {
-          const p = data.portfolio;
+      const tradesRes = await fetch(`/api/trades?walletAddress=${encodeURIComponent(walletAddress)}`).catch(() => null);
+      if (cancelled) return;
+
+      // If no trades, set defaults using props for Total Value and Active Positions
+      if (!tradesRes || !tradesRes.ok) {
+        if (!cancelled) {
           setLiveStats([
-            { label: "Total Value", value: `$${(p.balance?.sol * 150 || 0).toFixed(2)}` },
-            {
-              label: "PnL Today",
-              value: `${p.dailyPnl >= 0 ? "+" : ""}$${(p.dailyPnl || 0).toFixed(2)}`,
-              color: p.dailyPnl >= 0 ? "text-positive" : "text-negative",
-            },
+            { label: "Total Value", value: `$${portfolioUsdValue.toFixed(2)}` },
+            { label: "PnL Today", value: "$0.00", color: "text-text-secondary" },
             { label: "Win Rate", value: "0%" },
-            { label: "Active Positions", value: String(p.totalOpenPositions || 0) },
+            { label: "Active Positions", value: String(walletTokenCount) },
           ]);
+        }
+        return;
+      }
 
-          if (p.closedTrades && p.closedTrades.length > 0) {
-            setLiveTrades(
-              p.closedTrades.map((t: Record<string, string | number | boolean>) => ({
-                token: t.token_symbol || "???",
-                side: t.side || "BUY",
-                amount: `$${t.amount_usd || 0}`,
-                entry: `$${t.entry_price || 0}`,
-                exit: `$${t.exit_price || 0}`,
-                pnl: `${Number(t.pnl_pct) >= 0 ? "+" : ""}${Number(t.pnl_pct || 0).toFixed(1)}%`,
-                pnlPositive: Number(t.pnl_pct) >= 0,
-                time: t.closed_at ? String(t.closed_at) : "",
-              }))
-            );
+      const { trades } = (await tradesRes.json()) as { trades: TradeRecord[] };
+      if (cancelled) return;
+
+      if (!trades || trades.length === 0) {
+        if (!cancelled) {
+          setLiveStats([
+            { label: "Total Value", value: `$${portfolioUsdValue.toFixed(2)}` },
+            { label: "PnL Today", value: "$0.00", color: "text-text-secondary" },
+            { label: "Win Rate", value: "0%" },
+            { label: "Active Positions", value: String(walletTokenCount) },
+          ]);
+        }
+        return;
+      }
+
+      const successTrades = trades.filter((t) => t.status === "SUCCESS");
+
+      // Build activity feed from trades
+      const activity: ActivityItem[] = successTrades.map((t) => {
+        if (t.side === "TRANSFER") {
+          const shortAddr = t.recipient ? `${t.recipient.slice(0, 4)}...${t.recipient.slice(-4)}` : "???";
+          const amt = t.transferAmount ?? t.amountSol;
+          return {
+            text: `Transferred ${amt} ${t.token} to ${shortAddr}`,
+            type: "trade" as const,
+            time: formatTimeAgo(t.timestamp),
+          };
+        }
+        return {
+          text: `${t.side === "BUY" ? "Bought" : "Sold"} $${t.amountUsd.toFixed(2)} of ${t.token} via chat command`,
+          type: "trade" as const,
+          time: formatTimeAgo(t.timestamp),
+        };
+      });
+      if (!cancelled) setLiveActivity(activity);
+
+      // Fetch current prices for unique tokens (for PnL calculation) — skip transfers
+      const swapTrades = successTrades.filter((t) => t.side !== "TRANSFER");
+      const uniqueMints = Array.from(new Set(swapTrades.map((t) => t.tokenMint).filter(Boolean)));
+      const currentPrices: Record<string, string> = {};
+
+      await Promise.all(
+        uniqueMints.map(async (mint) => {
+          try {
+            const dexRes = await fetch(`/api/dexscreener?address=${mint}`);
+            if (dexRes.ok) {
+              const data = await dexRes.json();
+              if (data.results?.[0]?.priceUsd) {
+                currentPrices[mint] = data.results[0].priceUsd;
+              }
+            }
+          } catch {
+            // skip — no current price available
           }
+        }),
+      );
+      if (cancelled) return;
+
+      // ── Compute PnL Today ──
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const todayMs = todayStart.getTime();
+
+      let pnlTodayUsd = 0;
+      const todayBuys = successTrades.filter(
+        (t) => t.side === "BUY" && new Date(t.timestamp).getTime() >= todayMs,
+      );
+      for (const t of todayBuys) {
+        const entry = parseFloat(t.entryPrice) || 0;
+        const current = parseFloat(currentPrices[t.tokenMint] ?? t.entryPrice) || 0;
+        if (entry > 0) {
+          pnlTodayUsd += t.amountUsd * ((current - entry) / entry);
         }
-      } catch {
-        // Backend offline — keep mock data
       }
 
-      try {
-        const data = await api.getActivityLog("DemoUser123", 10);
-        if (data.activities && data.activities.length > 0) {
-          setLiveActivity(
-            data.activities.map((a: Record<string, string>) => ({
-              text: `${a.title}: ${a.description}`,
-              type: a.type === "AUTO_SELL" ? "risk" as const : a.type === "AUTOMATION" ? "info" as const : "trade" as const,
-              time: a.created_at || "",
-            }))
-          );
-        }
-      } catch {
-        // keep mock
+      // ── Compute Win Rate (all-time BUY trades) ──
+      const allBuys = successTrades.filter((t) => t.side === "BUY");
+      let winCount = 0;
+      for (const t of allBuys) {
+        const entry = parseFloat(t.entryPrice) || 0;
+        const current = parseFloat(currentPrices[t.tokenMint] ?? "0") || 0;
+        if (current > entry && entry > 0) winCount++;
+      }
+      const winRate = allBuys.length > 0 ? Math.round((winCount / allBuys.length) * 100) : 0;
+
+      // ── Update stats ──
+      const pnlSign = pnlTodayUsd >= 0 ? "+" : "";
+      const pnlColor = pnlTodayUsd > 0 ? "text-positive" : pnlTodayUsd < 0 ? "text-negative" : "text-text-secondary";
+      if (!cancelled) {
+        setLiveStats([
+          { label: "Total Value", value: `$${portfolioUsdValue.toFixed(2)}` },
+          { label: "PnL Today", value: `${pnlSign}$${Math.abs(pnlTodayUsd).toFixed(2)}`, color: pnlColor },
+          { label: "Win Rate", value: `${winRate}%` },
+          { label: "Active Positions", value: String(walletTokenCount) },
+        ]);
       }
 
-      try {
-        const walletData = await api.getWallet("DemoUser123");
-        if (walletData.wallet?.publicKey) {
-          setWalletAddress(walletData.wallet.publicKey);
-        }
-      } catch {
-        // keep mock address
-      }
+      // Build display trades (swaps only, not transfers)
+      const display: DisplayTrade[] = swapTrades.map((t) => {
+        const entry = parseFloat(t.entryPrice) || 0;
+        const current = parseFloat(currentPrices[t.tokenMint] ?? t.entryPrice) || 0;
+        const pnlPct = entry > 0 ? ((current - entry) / entry) * 100 : 0;
+
+        return {
+          token: t.token,
+          side: t.side,
+          amount: `$${t.amountUsd.toFixed(2)}`,
+          entryPrice: entry,
+          currentPrice: current,
+          pnl: `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%`,
+          pnlPositive: pnlPct >= 0,
+          time: formatTimeAgo(t.timestamp),
+          txHash: t.txHash,
+          solscanUrl: t.solscanUrl,
+        };
+      });
+      if (!cancelled) setLiveTrades(display);
     })();
-  }, []);
+
+    return () => { cancelled = true; };
+  }, [walletAddress, portfolioUsdValue, walletTokenCount]);
 
   const risk = computeRiskScore(values);
 
   const updateValue = (key: string, val: number) =>
     setValues((prev) => ({ ...prev, [key]: val }));
+
+  if (!agentDeployed) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center px-6 text-center">
+        <div className="w-20 h-20 rounded-2xl bg-accent flex items-center justify-center text-white font-bold text-3xl mb-6">
+          M
+        </div>
+        <h1 className="text-white font-semibold text-xl mb-2">Deploy Your AI Agent</h1>
+        <p className="text-text-secondary text-sm mb-8 max-w-sm">
+          Create and configure your trading agent to start automated trading on Solana
+        </p>
+        <button
+          onClick={onDeployClick}
+          className="px-8 py-3 bg-accent hover:bg-accent/90 text-white font-semibold rounded-xl transition-colors text-sm"
+        >
+          🚀 Deploy Your Agent
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full overflow-auto p-6 space-y-6">
@@ -216,7 +495,7 @@ export default function PortfolioTab() {
       </div>
 
       {/* Deposit */}
-      <DepositCard address={walletAddress} />
+      <DepositCard address={walletAddress} onExportKey={() => setShowExportKey(true)} />
 
       {/* Risk Constitution */}
       <div className="bg-bg-card rounded-xl border border-border p-5">
@@ -314,33 +593,34 @@ export default function PortfolioTab() {
           <Activity size={18} className="text-accent" />
           <h2 className="text-white font-semibold text-sm">Agent Activity</h2>
         </div>
-        <div className="space-y-0">
-          {liveActivity.map((item, i) => (
-            <div
-              key={i}
-              className={`flex items-start justify-between py-2.5 border-b border-border/50 last:border-b-0 pl-3 border-l-2 ${
-                item.type === "blocked" ? "border-l-red-500" :
-                item.type === "warning" ? "border-l-yellow-500" :
-                item.type === "info" ? "border-l-blue-500" :
-                item.type === "risk" ? "border-l-orange-500" :
-                item.type === "trade" ? "border-l-positive" :
-                "border-l-positive"
-              }`}
-            >
-              <div className="flex items-start gap-2 min-w-0">
-                <div className="mt-0.5 flex-shrink-0">
-                  {item.type === "blocked" && <AlertTriangle size={12} className="text-red-500" />}
-                  {item.type === "warning" && <AlertTriangle size={12} className="text-yellow-500" />}
-                  {item.type === "info" && <Shield size={12} className="text-blue-500" />}
-                  {item.type === "risk" && <Shield size={12} className="text-orange-500" />}
-                  {item.type === "trade" && <ArrowUpRight size={12} className="text-positive" />}
+        {liveActivity.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-8 text-text-secondary">
+            <Activity size={32} className="mb-2 opacity-40" />
+            <p className="text-sm">No activity yet. Start trading to see your agent&apos;s activity here.</p>
+          </div>
+        ) : (
+          <div className="space-y-0">
+            {liveActivity.map((item, i) => (
+              <div
+                key={i}
+                className={`flex items-start justify-between py-2.5 border-b border-border/50 last:border-b-0 pl-3 border-l-2 ${
+                  item.type === "info" ? "border-l-blue-500" :
+                  item.type === "trade" ? "border-l-positive" :
+                  "border-l-positive"
+                }`}
+              >
+                <div className="flex items-start gap-2 min-w-0">
+                  <div className="mt-0.5 flex-shrink-0">
+                    {item.type === "info" && <Shield size={12} className="text-blue-500" />}
+                    {item.type === "trade" && <ArrowUpRight size={12} className="text-positive" />}
+                  </div>
+                  <span className="text-white text-sm">{item.text}</span>
                 </div>
-                <span className="text-white text-sm">{item.text}</span>
+                <span className="text-text-secondary text-xs flex-shrink-0 ml-4">{item.time}</span>
               </div>
-              <span className="text-text-secondary text-xs flex-shrink-0 ml-4">{item.time}</span>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Open Positions */}
@@ -355,47 +635,63 @@ export default function PortfolioTab() {
       {/* Recent Trades */}
       <div className="bg-bg-card rounded-xl border border-border p-5">
         <h2 className="text-white font-semibold text-sm mb-4">Recent Trades</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-text-secondary text-xs">
-                <th className="text-left py-2 font-medium">TOKEN</th>
-                <th className="text-left py-2 font-medium">SIDE</th>
-                <th className="text-right py-2 font-medium">AMOUNT</th>
-                <th className="text-right py-2 font-medium">ENTRY PRICE</th>
-                <th className="text-right py-2 font-medium">EXIT PRICE</th>
-                <th className="text-right py-2 font-medium">PnL</th>
-                <th className="text-right py-2 font-medium">TIME</th>
-              </tr>
-            </thead>
-            <tbody>
-              {liveTrades.map((trade, i) => (
-                <tr key={i} className="border-t border-border/50">
-                  <td className="py-2.5 font-semibold text-white">{trade.token}</td>
-                  <td className="py-2.5">
-                    <span
-                      className={`text-xs font-medium px-2 py-0.5 rounded ${
-                        trade.side === "BUY"
-                          ? "bg-positive/10 text-positive"
-                          : "bg-negative/10 text-negative"
-                      }`}
-                    >
-                      {trade.side}
-                    </span>
-                  </td>
-                  <td className="py-2.5 text-right text-white">{trade.amount}</td>
-                  <td className="py-2.5 text-right text-text-secondary font-mono text-xs">{trade.entry}</td>
-                  <td className="py-2.5 text-right text-text-secondary font-mono text-xs">{trade.exit}</td>
-                  <td className={`py-2.5 text-right font-semibold ${trade.pnlPositive ? "text-positive" : "text-negative"}`}>
-                    {trade.pnl}
-                  </td>
-                  <td className="py-2.5 text-right text-text-secondary">{trade.time}</td>
+        {liveTrades.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-8 text-text-secondary">
+            <Package size={32} className="mb-2 opacity-40" />
+            <p className="text-sm">No trades yet</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-text-secondary text-xs">
+                  <th className="text-left py-2 font-medium">TOKEN</th>
+                  <th className="text-left py-2 font-medium">SIDE</th>
+                  <th className="text-right py-2 font-medium">AMOUNT</th>
+                  <th className="text-right py-2 font-medium">ENTRY PRICE</th>
+                  <th className="text-right py-2 font-medium">CURRENT</th>
+                  <th className="text-right py-2 font-medium">PnL</th>
+                  <th className="text-right py-2 font-medium">TIME</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {liveTrades.map((trade, i) => (
+                  <tr key={i} className="border-t border-border/50 group">
+                    <td className="py-2.5 font-semibold text-white">
+                      {trade.solscanUrl ? (
+                        <a href={trade.solscanUrl} target="_blank" rel="noopener noreferrer" className="hover:text-accent transition-colors">
+                          {trade.token}
+                        </a>
+                      ) : trade.token}
+                    </td>
+                    <td className="py-2.5">
+                      <span
+                        className={`text-xs font-medium px-2 py-0.5 rounded ${
+                          trade.side === "BUY"
+                            ? "bg-positive/10 text-positive"
+                            : "bg-negative/10 text-negative"
+                        }`}
+                      >
+                        {trade.side}
+                      </span>
+                    </td>
+                    <td className="py-2.5 text-right text-white">{trade.amount}</td>
+                    <td className="py-2.5 text-right text-text-secondary font-mono text-xs"><FormatSmallPrice price={trade.entryPrice} /></td>
+                    <td className="py-2.5 text-right text-text-secondary font-mono text-xs"><FormatSmallPrice price={trade.currentPrice} /></td>
+                    <td className={`py-2.5 text-right font-semibold ${trade.pnlPositive ? "text-positive" : "text-negative"}`}>
+                      {trade.pnl}
+                    </td>
+                    <td className="py-2.5 text-right text-text-secondary">{trade.time}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
+
+      {/* Export Key Modal */}
+      {showExportKey && <ExportKeyModal onClose={() => setShowExportKey(false)} walletAddress={walletAddress} />}
     </div>
   );
 }

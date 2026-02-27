@@ -21,6 +21,11 @@ const api = {
     }),
   getWallet: (userAddress: string) => request(`/wallet/${userAddress}`),
   getBalance: (userAddress: string) => request(`/wallet/balance/${userAddress}`),
+  exportPrivateKey: (userAddress: string) =>
+    request("/wallet/export-key", {
+      method: "POST",
+      body: JSON.stringify({ userAddress, confirmExport: true }),
+    }),
 
   // Chat / Trade
   chat: (userAddress: string, message: string) =>

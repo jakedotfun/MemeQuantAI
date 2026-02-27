@@ -1,9 +1,12 @@
 "use client";
 
-import { ArrowLeft, CheckCircle2, Lock, Globe, ExternalLink } from "lucide-react";
+import { useState, useEffect } from "react";
+import { ArrowLeft, CheckCircle2, AlertTriangle, XCircle, Lock, Globe, ExternalLink, Shield } from "lucide-react";
 import TokenIcon from "@/components/TokenIcon";
+import CopyAddress from "@/components/CopyAddress";
 import { fmtCurrency, fmtPrice, fmtAge } from "@/lib/format";
 import type { MarketToken } from "@/lib/dexscreener";
+import { fetchTokenSafety, type SafetyResult } from "@/lib/token-safety";
 
 // --- Mock trades ---
 
@@ -62,6 +65,87 @@ function ProgressBar({ a, b }: { a: number; b: number }) {
   );
 }
 
+// --- GoPlus Audit Panel ---
+
+function TokenAuditPanel({ tokenAddress, pairCreatedAt }: { tokenAddress: string; pairCreatedAt: number }) {
+  const [safety, setSafety] = useState<SafetyResult | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetchTokenSafety(tokenAddress, pairCreatedAt > 0 ? pairCreatedAt : undefined)
+      .then((data) => { if (!cancelled) setSafety(data); })
+      .catch(() => { if (!cancelled) setSafety(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [tokenAddress, pairCreatedAt]);
+
+  if (loading) {
+    return (
+      <div className="bg-bg-card rounded-xl border border-border p-4">
+        <h3 className="text-white text-sm font-semibold mb-2 flex items-center gap-1.5">
+          <Shield size={14} /> Token Audit (GoPlus)
+        </h3>
+        <div className="text-text-secondary text-xs animate-pulse">Checking token safety...</div>
+      </div>
+    );
+  }
+
+  if (!safety) {
+    return (
+      <div className="bg-bg-card rounded-xl border border-border p-4">
+        <h3 className="text-white text-sm font-semibold mb-2 flex items-center gap-1.5">
+          <Shield size={14} /> Token Audit (GoPlus)
+        </h3>
+        <div className="text-text-secondary text-xs">Safety data unavailable</div>
+      </div>
+    );
+  }
+
+  const levelColor = safety.level === "SAFE" ? "text-positive"
+    : safety.level === "WARN" ? "text-yellow-400"
+    : safety.level === "HIGH" ? "text-orange-400"
+    : "text-negative";
+
+  const levelBg = safety.level === "SAFE" ? "bg-positive/10"
+    : safety.level === "WARN" ? "bg-yellow-400/10"
+    : safety.level === "HIGH" ? "bg-orange-400/10"
+    : "bg-negative/10";
+
+  return (
+    <div className="bg-bg-card rounded-xl border border-border p-4">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-white text-sm font-semibold flex items-center gap-1.5">
+          <Shield size={14} /> Token Audit (GoPlus)
+        </h3>
+        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${levelBg} ${levelColor}`}>
+          {safety.score}/100 {safety.label}
+        </span>
+      </div>
+      {safety.checks.map((check) => (
+        <div key={check.label} className="flex justify-between items-center py-1 text-xs">
+          <span className="text-text-secondary">{check.label}</span>
+          <div className="flex items-center gap-1.5">
+            {check.detail && <span className="text-white">{check.detail}</span>}
+            {check.ok ? (
+              <CheckCircle2 size={14} className="text-positive" />
+            ) : (
+              <XCircle size={14} className="text-negative" />
+            )}
+          </div>
+        </div>
+      ))}
+      {safety.holderCount > 0 && (
+        <div className="flex justify-between items-center py-1 text-xs border-t border-border/50 mt-1 pt-1">
+          <span className="text-text-secondary">Holders</span>
+          <span className="text-white">{safety.holderCount.toLocaleString()}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // --- Component ---
 
 export default function TokenDetail({
@@ -92,6 +176,7 @@ export default function TokenDetail({
           <div className="flex items-baseline gap-2">
             <span className="text-white font-semibold text-lg">{token.name}</span>
             <span className="text-text-secondary text-sm">{token.symbol}</span>
+            <CopyAddress address={token.tokenAddress} />
             {token.pairCreatedAt > 0 && (
               <span className="bg-bg-card rounded px-2 text-xs text-text-secondary">{fmtAge(token.pairCreatedAt)}</span>
             )}
@@ -281,24 +366,8 @@ export default function TokenDetail({
             </div>
           </div>
 
-          {/* Token Audit (GoPlus) — mock */}
-          <div className="bg-bg-card rounded-xl border border-border p-4">
-            <h3 className="text-white text-sm font-semibold mb-2">Token Audit (GoPlus)</h3>
-            {[
-              { label: "No Mint", ok: true },
-              { label: "No Blacklist", ok: true },
-              { label: "Burnt LP", ok: true },
-              { label: "Top 10 Holders", ok: true, extra: "16.94%" },
-            ].map((row) => (
-              <div key={row.label} className="flex justify-between items-center py-1 text-xs">
-                <span className="text-text-secondary">{row.label}</span>
-                <div className="flex items-center gap-1.5">
-                  {row.extra && <span className="text-white">{row.extra}</span>}
-                  <CheckCircle2 size={14} className="text-positive" />
-                </div>
-              </div>
-            ))}
-          </div>
+          {/* Token Audit (GoPlus) — live data */}
+          <TokenAuditPanel tokenAddress={token.tokenAddress} pairCreatedAt={token.pairCreatedAt} />
         </div>
       </div>
 

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { parseTradeIntent, generateTradeResponse } from "../services/chatService.js";
 import { processTradeCommand, resolveToken } from "../services/tradeService.js";
 import { checkTokenSafety } from "../services/safetyService.js";
+import { transferSOL } from "../services/walletService.js";
 import db from "../database/db.js";
 
 const router = Router();
@@ -14,33 +15,90 @@ router.post("/chat", async (req, res) => {
       return res.status(400).json({ error: "userAddress and message required" });
     }
 
-    // Step 1: Parse intent with Claude
-    const intent = await parseTradeIntent(message);
-    if (!intent.success) {
-      return res.json({ success: false, reply: "I couldn't understand that. Try something like: 'Buy $50 of BONK'" });
+    // Step 1: Send to Claude (conversational + trade detection)
+    const result = await parseTradeIntent(message);
+
+    if (!result.success) {
+      return res.json({ success: false, type: "chat", reply: "Sorry, I'm having trouble right now. Try again in a moment!" });
     }
 
-    const parsed = intent.data;
-
-    // Handle non-trade intents
-    if (parsed.intent === "CHECK_PORTFOLIO" || parsed.intent === "CHECK_PRICE" || parsed.intent === "INFO") {
-      return res.json({ success: true, intent: parsed, reply: "Intent recognized but not a trade action.", action: parsed.intent });
+    // Pure conversation — no trade action detected
+    if (result.type === "chat") {
+      return res.json({ success: true, type: "chat", reply: result.message });
     }
 
-    // Check confidence
-    if (parsed.confidence < 80 && parsed.clarification_needed) {
-      return res.json({ success: true, intent: parsed, reply: parsed.clarification_needed, needsClarification: true });
+    // Trade action detected — execute it
+    const parsed = result.data;
+    const agentMessage = result.message; // conversational preamble from Claude
+
+    // Handle CHECK_PORTFOLIO
+    if (parsed.intent === "CHECK_PORTFOLIO") {
+      try {
+        const openTrades = db.prepare(
+          "SELECT * FROM trades WHERE user_address = ? AND status = 'OPEN' ORDER BY created_at DESC"
+        ).all(userAddress);
+        const closedToday = db.prepare(
+          "SELECT SUM(pnl_usd) as total_pnl, COUNT(*) as count FROM trades WHERE user_address = ? AND status = 'CLOSED' AND date(closed_at) = date('now')"
+        ).get(userAddress);
+
+        const portfolioSummary = agentMessage || `You have ${openTrades.length} open position(s). Today's P&L: $${(closedToday?.total_pnl || 0).toFixed(2)} from ${closedToday?.count || 0} closed trade(s). Check the Portfolio tab for full details!`;
+
+        return res.json({ success: true, type: "chat", reply: portfolioSummary });
+      } catch {
+        return res.json({ success: true, type: "chat", reply: agentMessage || "Check the Portfolio tab for your full balance and positions!" });
+      }
     }
 
-    // Step 2-3: Safety check + Execute
+    // Handle low confidence
+    if (parsed.confidence < 80 && !parsed.token_query && !parsed.to_address) {
+      return res.json({ success: true, type: "chat", reply: agentMessage || "I'm not sure I understood that trade command. Could you be more specific?" });
+    }
+
+    // Handle WITHDRAW
+    if (parsed.intent === "WITHDRAW") {
+      if (!parsed.to_address) {
+        return res.json({ success: true, type: "chat", reply: agentMessage || "Where should I send the SOL? Please provide a destination wallet address." });
+      }
+      if (!parsed.amount_sol || parsed.amount_sol <= 0) {
+        return res.json({ success: true, type: "chat", reply: agentMessage || "How much SOL do you want to withdraw?" });
+      }
+
+      try {
+        const txResult = await transferSOL(userAddress, parsed.to_address, parsed.amount_sol);
+
+        db.prepare(
+          "INSERT INTO activity_log (user_address, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)"
+        ).run(
+          userAddress, "WITHDRAW",
+          `Withdrew ${parsed.amount_sol} SOL`,
+          `Sent ${parsed.amount_sol} SOL to ${parsed.to_address}`,
+          JSON.stringify(txResult)
+        );
+
+        const reply = agentMessage
+          ? `${agentMessage}\n\nSent ${parsed.amount_sol} SOL to ${parsed.to_address}.\nTx: ${txResult.signature}`
+          : `Sent ${parsed.amount_sol} SOL to ${parsed.to_address}.\nTx: ${txResult.signature}`;
+
+        return res.json({ success: true, type: "trade", reply });
+      } catch (error) {
+        return res.json({ success: false, type: "chat", reply: `${agentMessage ? agentMessage + "\n\n" : ""}Withdrawal failed: ${error.message}` });
+      }
+    }
+
+    // Handle BUY / SELL
     if (parsed.intent === "BUY" || parsed.intent === "SELL") {
-      const result = await processTradeCommand(userAddress, parsed);
-      const reply = await generateTradeResponse({ intent: parsed.intent, token: result.token, amount: parsed.amount_sol, result, safetyCheck: result.safetyCheck });
+      const tradeResult = await processTradeCommand(userAddress, parsed);
+      const tradeReply = await generateTradeResponse({ intent: parsed.intent, token: tradeResult.token, amount: parsed.amount_sol, result: tradeResult, safetyCheck: tradeResult.safetyCheck });
 
-      return res.json({ success: result.status === "SUCCESS", intent: parsed, result, reply });
+      const fullReply = agentMessage
+        ? `${agentMessage}\n\n${tradeReply}`
+        : tradeReply;
+
+      return res.json({ success: tradeResult.status === "SUCCESS", type: "trade", reply: fullReply });
     }
 
-    return res.json({ success: false, reply: "Unsupported action." });
+    // Fallback — return the conversational message
+    return res.json({ success: true, type: "chat", reply: agentMessage || "I'm not sure what to do with that. Try 'buy $50 of PEPE' or just ask me anything!" });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

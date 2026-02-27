@@ -13,6 +13,8 @@ import RightPanel from "@/components/RightPanel";
 import DeployModal from "@/components/DeployModal";
 import SearchModal from "@/components/SearchModal";
 import DeployPromptModal from "@/components/DeployPromptModal";
+import { useWalletBalance } from "@/hooks/useWalletBalance";
+import type { AgentAction } from "@/components/RightPanel";
 import type { MarketToken } from "@/lib/dexscreener";
 
 type Tab = "market" | "portfolio" | "automations" | "referral" | "pricing" | "stats";
@@ -22,6 +24,11 @@ export default function Home() {
   const [showDeployModal, setShowDeployModal] = useState(false);
   const [agentDeployed, setAgentDeployed] = useState(false);
   const [agentName, setAgentName] = useState("");
+  const [walletAddress, setWalletAddress] = useState("");
+
+  // Shared wallet balance — auto-refreshes every 30s, works for any address
+  const walletBalance = useWalletBalance(walletAddress);
+  const portfolioUsdValue = walletBalance.usdValue;
 
   // Token detail state
   const [selectedToken, setSelectedToken] = useState<MarketToken | null>(null);
@@ -32,10 +39,11 @@ export default function Home() {
   const [pendingBuyMessage, setPendingBuyMessage] = useState<string | null>(null);
   const [buyPromptToken, setBuyPromptToken] = useState<string | null>(null);
 
-  const handleDeployDone = (name: string) => {
+  const handleDeployDone = (name: string, address: string) => {
     setShowDeployModal(false);
     setAgentDeployed(true);
     setAgentName(name);
+    setWalletAddress(address);
   };
 
   const handleSelectToken = useCallback((symbol: string) => {
@@ -59,6 +67,32 @@ export default function Home() {
     setPendingBuyMessage(null);
   }, []);
 
+  const handleAgentAction = useCallback((action: AgentAction) => {
+    switch (action.type) {
+      case "NAVIGATE":
+        if (action.target && ["market", "portfolio", "automations", "referral", "pricing", "stats"].includes(action.target)) {
+          setActiveTab(action.target as Tab);
+          setSelectedToken(null); // exit token detail if in it
+        }
+        break;
+      case "REFRESH_BALANCE":
+        walletBalance.refresh();
+        break;
+      case "OPEN_DEPOSIT":
+        // Navigate to portfolio which shows the deposit/wallet section
+        setActiveTab("portfolio");
+        setSelectedToken(null);
+        break;
+      case "UPDATE_RISK":
+        // Risk settings are handled within AutomationsTab — navigate there
+        // The setting and value are logged for future use when risk state is lifted
+        console.log("[AGENT ACTION] UPDATE_RISK:", action.setting, "=", action.value);
+        setActiveTab("automations");
+        setSelectedToken(null);
+        break;
+    }
+  }, [walletBalance]);
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-bg-primary">
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
@@ -75,10 +109,11 @@ export default function Home() {
               onSearchClick={() => setShowSearchModal(true)}
               highlightedToken={highlightedToken}
               onTokenClick={(token) => setSelectedToken(token)}
+              portfolioUsdValue={portfolioUsdValue}
             />
           )
         )}
-        {activeTab === "portfolio" && <PortfolioTab />}
+        {activeTab === "portfolio" && <PortfolioTab agentDeployed={agentDeployed} onDeployClick={() => setShowDeployModal(true)} walletAddress={walletAddress} portfolioUsdValue={portfolioUsdValue} walletTokenCount={walletBalance.tokens.length} onRefreshBalance={walletBalance.refresh} />}
         {activeTab === "automations" && <AutomationsTab />}
         {activeTab === "referral" && <ReferralTab />}
         {activeTab === "pricing" && <PricingTab />}
@@ -89,8 +124,11 @@ export default function Home() {
         onDeployClick={() => setShowDeployModal(true)}
         agentDeployed={agentDeployed}
         agentName={agentName}
+        walletAddress={walletAddress}
         pendingBuyMessage={pendingBuyMessage}
         onPendingBuyConsumed={handlePendingBuyConsumed}
+        onBalanceRefresh={walletBalance.refresh}
+        onAgentAction={handleAgentAction}
       />
 
       {showDeployModal && (

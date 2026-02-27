@@ -34,9 +34,12 @@ Thumbs.db
 *.swo
 
 # Server
+server/.env
 server/database/*.db
 server/database/*.db-wal
 server/database/*.db-shm
+server/data/wallets.json
+server/data/trades.json
 
 # Misc
 *.tsbuildinfo

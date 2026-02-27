@@ -7,6 +7,15 @@ import { SOLANA_RPC_URL, JUPITER_API, DEFAULT_RISK_PARAMS } from "../utils/const
 const connection = new Connection(SOLANA_RPC_URL);
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 
+/** Headers for all Jupiter API calls */
+function jupiterHeaders(extra = {}) {
+  const headers = {};
+  if (process.env.JUPITER_API_KEY) {
+    headers["x-api-key"] = process.env.JUPITER_API_KEY;
+  }
+  return { ...headers, ...extra };
+}
+
 // Resolve token symbol to mint address using Jupiter Token List
 export async function resolveToken(query) {
   try {
@@ -99,28 +108,38 @@ export async function executeBuy(userAddress, tokenMint, amountSol, stopLossPct 
     const amountLamports = Math.floor(amountSol * 1e9);
     const slippageBps = getDynamicSlippage(amountSol * 150); // rough SOL→USD estimate
 
-    // Get quote from Jupiter
-    const quoteUrl = `${JUPITER_API}/quote?inputMint=${SOL_MINT}&outputMint=${tokenMint}&amount=${amountLamports}&slippageBps=${slippageBps}`;
-    const quoteRes = await fetch(quoteUrl);
+    // Get quote from Jupiter (with API key header)
+    const quoteUrl = `${JUPITER_API}/quote?inputMint=${SOL_MINT}&outputMint=${tokenMint}&amount=${amountLamports}&slippageBps=${slippageBps}&restrictIntermediateTokens=true`;
+    const quoteRes = await fetch(quoteUrl, { headers: jupiterHeaders() });
     if (!quoteRes.ok) {
-      return { status: "FAILED", error: `Jupiter quote failed: ${quoteRes.status}` };
+      const body = await quoteRes.text().catch(() => "");
+      console.error("[tradeService] Quote error:", quoteRes.status, body);
+      return { status: "FAILED", error: `Jupiter quote failed: ${quoteRes.status} ${body}` };
     }
     const quote = await quoteRes.json();
 
-    // Get swap transaction
+    // Get swap transaction (official docs format with API key)
     const swapRes = await fetch(`${JUPITER_API}/swap`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jupiterHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
-        quoteResponse: quote,
         userPublicKey: keypair.publicKey.toBase58(),
+        quoteResponse: quote,
         wrapAndUnwrapSol: true,
         dynamicComputeUnitLimit: true,
-        prioritizationFeeLamports: "auto",
+        dynamicSlippage: true,
+        prioritizationFeeLamports: {
+          priorityLevelWithMaxLamports: {
+            priorityLevel: "veryHigh",
+            maxLamports: 1000000,
+          },
+        },
       }),
     });
     if (!swapRes.ok) {
-      return { status: "FAILED", error: `Jupiter swap failed: ${swapRes.status}` };
+      const body = await swapRes.text().catch(() => "");
+      console.error("[tradeService] Swap error:", swapRes.status, body);
+      return { status: "FAILED", error: `Jupiter swap failed: ${swapRes.status} ${body}` };
     }
     const swapData = await swapRes.json();
 
@@ -129,18 +148,18 @@ export async function executeBuy(userAddress, tokenMint, amountSol, stopLossPct 
     const tx = VersionedTransaction.deserialize(txBuf);
     tx.sign([keypair]);
 
-    const txHash = await connection.sendTransaction(tx, {
-      skipPreflight: false,
+    const txHash = await connection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: true,
       maxRetries: 3,
     });
 
-    // Confirm transaction
-    const latestBlockhash = await connection.getLatestBlockhash();
+    // Confirm transaction (use lastValidBlockHeight from swap response if available)
+    const latestBlockhash = await connection.getLatestBlockhash("confirmed");
     await connection.confirmTransaction({
       signature: txHash,
       blockhash: latestBlockhash.blockhash,
-      lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-    });
+      lastValidBlockHeight: swapData.lastValidBlockHeight || latestBlockhash.lastValidBlockHeight,
+    }, "confirmed");
 
     // Calculate entry price
     const outputAmount = parseInt(quote.outAmount);
@@ -206,28 +225,38 @@ export async function executeSell(userAddress, tokenMint, amountPct = 100) {
 
     const slippageBps = 300; // 3% default for sells
 
-    // Get quote from Jupiter
-    const quoteUrl = `${JUPITER_API}/quote?inputMint=${tokenMint}&outputMint=${SOL_MINT}&amount=${sellAmount}&slippageBps=${slippageBps}`;
-    const quoteRes = await fetch(quoteUrl);
+    // Get quote from Jupiter (with API key header)
+    const quoteUrl = `${JUPITER_API}/quote?inputMint=${tokenMint}&outputMint=${SOL_MINT}&amount=${sellAmount}&slippageBps=${slippageBps}&restrictIntermediateTokens=true`;
+    const quoteRes = await fetch(quoteUrl, { headers: jupiterHeaders() });
     if (!quoteRes.ok) {
-      return { status: "FAILED", error: `Jupiter quote failed: ${quoteRes.status}` };
+      const body = await quoteRes.text().catch(() => "");
+      console.error("[tradeService] Sell quote error:", quoteRes.status, body);
+      return { status: "FAILED", error: `Jupiter quote failed: ${quoteRes.status} ${body}` };
     }
     const quote = await quoteRes.json();
 
-    // Get swap transaction
+    // Get swap transaction (official docs format with API key)
     const swapRes = await fetch(`${JUPITER_API}/swap`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jupiterHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
-        quoteResponse: quote,
         userPublicKey: keypair.publicKey.toBase58(),
+        quoteResponse: quote,
         wrapAndUnwrapSol: true,
         dynamicComputeUnitLimit: true,
-        prioritizationFeeLamports: "auto",
+        dynamicSlippage: true,
+        prioritizationFeeLamports: {
+          priorityLevelWithMaxLamports: {
+            priorityLevel: "veryHigh",
+            maxLamports: 1000000,
+          },
+        },
       }),
     });
     if (!swapRes.ok) {
-      return { status: "FAILED", error: `Jupiter swap failed: ${swapRes.status}` };
+      const body = await swapRes.text().catch(() => "");
+      console.error("[tradeService] Sell swap error:", swapRes.status, body);
+      return { status: "FAILED", error: `Jupiter swap failed: ${swapRes.status} ${body}` };
     }
     const swapData = await swapRes.json();
 
@@ -236,17 +265,17 @@ export async function executeSell(userAddress, tokenMint, amountPct = 100) {
     const tx = VersionedTransaction.deserialize(txBuf);
     tx.sign([keypair]);
 
-    const txHash = await connection.sendTransaction(tx, {
-      skipPreflight: false,
+    const txHash = await connection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: true,
       maxRetries: 3,
     });
 
-    const latestBlockhash = await connection.getLatestBlockhash();
+    const latestBlockhash = await connection.getLatestBlockhash("confirmed");
     await connection.confirmTransaction({
       signature: txHash,
       blockhash: latestBlockhash.blockhash,
-      lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-    });
+      lastValidBlockHeight: swapData.lastValidBlockHeight || latestBlockhash.lastValidBlockHeight,
+    }, "confirmed");
 
     // Calculate exit price and P&L
     const solReceived = parseInt(quote.outAmount) / 1e9;

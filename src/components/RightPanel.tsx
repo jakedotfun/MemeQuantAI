@@ -1,30 +1,61 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { Send, ChevronRight, ChevronLeft } from "lucide-react";
-import api from "@/lib/api";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Send, ChevronRight, ChevronLeft, Loader2 } from "lucide-react";
+
+export interface AgentAction {
+  type: "NAVIGATE" | "REFRESH_BALANCE" | "UPDATE_RISK" | "OPEN_DEPOSIT";
+  target?: string;    // e.g. "portfolio", "market", "automations"
+  setting?: string;   // e.g. "stopLoss", "takeProfit"
+  value?: number;
+}
+
+const ACTION_TAG_RE = /\[ACTION:([A-Z_]+)(?::([^\]:]*))?(?::([^\]]*))?\]/g;
+
+/**
+ * Parse [ACTION:...] tags from text. Returns cleaned text and list of actions.
+ */
+function parseActions(text: string): { cleanText: string; actions: AgentAction[] } {
+  const actions: AgentAction[] = [];
+  let match;
+  const re = new RegExp(ACTION_TAG_RE.source, "g");
+  while ((match = re.exec(text)) !== null) {
+    const type = match[1] as AgentAction["type"];
+    const arg1 = match[2] || undefined;
+    const arg2 = match[3] || undefined;
+
+    if (type === "NAVIGATE") {
+      actions.push({ type, target: arg1 });
+    } else if (type === "UPDATE_RISK") {
+      actions.push({ type, setting: arg1, value: arg2 ? Number(arg2) : undefined });
+    } else if (type === "REFRESH_BALANCE" || type === "OPEN_DEPOSIT") {
+      actions.push({ type });
+    }
+  }
+  const cleanText = text.replace(re, "").replace(/\n{3,}/g, "\n\n").trim();
+  return { cleanText, actions };
+}
 
 interface Message {
   role: "user" | "agent";
   content: string[];
 }
 
-const fallbackPipelineSteps = [
-  "\ud83d\udd0d Token Resolution: Found 3 tokens named PEPE \u2192 Selected verified token with highest LP ($2.1M)",
-  "\ud83d\udee1\ufe0f GoPlus Safety: Score 15/100 (SAFE) \u2014 No honeypot, mint authority revoked, top-10 holders: 32%",
-  "\u26a1 Slippage: 3% (trade $50-200 range) | Max trade cap: $200",
-  "\u2705 Bought 12.5M PEPE at $0.00004 via Jupiter\nTx: 7xKX...gAsU",
-  "\ud83d\udd12 Stop-loss set at -20% | Take-profit at +100%",
-];
-
-function isBuyMessage(text: string): boolean {
-  return /\bbuy\b/i.test(text);
+// Render markdown bold (**text**) as <strong> tags
+function renderMarkdown(text: string) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={i} className="text-white font-semibold">{part.slice(2, -2)}</strong>;
+    }
+    return <span key={i}>{part}</span>;
+  });
 }
 
 function makeWelcomeMessage(agentName: string): Message {
   const name = agentName
     ? `${agentName}, your trading agent live on Solana`
-    : "your MemeQuant agent, live on Solana";
+    : "Testie, your MemeQuant trading agent on Solana";
   return {
     role: "agent",
     content: [
@@ -37,19 +68,26 @@ export default function RightPanel({
   onDeployClick,
   agentDeployed,
   agentName = "",
+  walletAddress = "",
   pendingBuyMessage,
   onPendingBuyConsumed,
+  onBalanceRefresh,
+  onAgentAction,
 }: {
   onDeployClick: () => void;
   agentDeployed: boolean;
   agentName?: string;
+  walletAddress?: string;
   pendingBuyMessage?: string | null;
   onPendingBuyConsumed?: () => void;
+  onBalanceRefresh?: () => void;
+  onAgentAction?: (action: AgentAction) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [hasStartedChat, setHasStartedChat] = useState(false);
   const [messages, setMessages] = useState<Message[]>([makeWelcomeMessage(agentName)]);
   const [input, setInput] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const sendingRef = useRef(false);
   const lastBuyRef = useRef<string | null>(null);
@@ -65,7 +103,7 @@ export default function RightPanel({
     if (hasStartedChat) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages, hasStartedChat]);
+  }, [messages, hasStartedChat, isTyping]);
 
   // Handle pending buy message from search modal
   useEffect(() => {
@@ -78,60 +116,134 @@ export default function RightPanel({
     const userMsg: Message = { role: "user", content: [pendingBuyMessage] };
     setMessages((prev) => [...prev, userMsg]);
 
-    sendToBackend(pendingBuyMessage);
+    sendToAPI([...messages, userMsg]);
     onPendingBuyConsumed?.();
   }, [pendingBuyMessage]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const streamSteps = (steps: string[]) => {
-    steps.forEach((step, i) => {
-      setTimeout(() => {
-        setMessages((prev) => {
-          const last = prev[prev.length - 1];
-          if (last && last.role === "agent" && i > 0) {
-            return [
-              ...prev.slice(0, -1),
-              { ...last, content: [...last.content, step] },
-            ];
-          }
-          return [...prev, { role: "agent", content: [step] }];
-        });
-      }, 500 * (i + 1));
-    });
-  };
+  // Build chat history for the API (flatten content arrays to single strings)
+  const buildApiHistory = useCallback((msgs: Message[]) => {
+    return msgs
+      .filter((m) => m.content.length > 0 && m.content[0].trim() !== "")
+      .map((m) => ({
+        role: m.role === "agent" ? "agent" : "user",
+        content: m.content.join("\n"),
+      }));
+  }, []);
 
-  const sendToBackend = async (message: string) => {
+  const sendToAPI = async (currentMessages: Message[]) => {
+    setIsTyping(true);
+
     try {
-      const data = await api.chat("DemoUser123", message);
-      if (data.steps && data.steps.length > 0) {
-        streamSteps(data.steps);
-      } else if (data.reply) {
-        setMessages((prev) => [...prev, { role: "agent", content: [data.reply] }]);
-      } else {
-        // Fallback for unexpected response shape
-        streamSteps(isBuyMessage(message) ? fallbackPipelineSteps : ["I received your message but couldn't process it. Please try again."]);
+      const history = buildApiHistory(currentMessages);
+
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: history, walletAddress: walletAddress || undefined, agentName: agentName || undefined }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`API ${res.status}`);
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response stream");
+
+      const decoder = new TextDecoder();
+      let accumulated = "";
+
+      // Add empty agent message that we'll stream into
+      setMessages((prev) => [...prev, { role: "agent", content: [""] }]);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n");
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6);
+
+          if (data === "[DONE]") break;
+
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) {
+              accumulated += `\n\nError: ${parsed.error}`;
+            } else if (parsed.text) {
+              accumulated += parsed.text;
+            }
+
+            // Update the last agent message with accumulated text
+            const current = accumulated;
+            setMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last && last.role === "agent") {
+                updated[updated.length - 1] = { role: "agent", content: [current] };
+              }
+              return updated;
+            });
+          } catch {
+            // Skip malformed JSON chunks
+          }
+        }
+      }
+      // Stream complete — strip any XML artifacts and parse actions
+      let cleaned = accumulated
+        .replace(/<function_calls>[\s\S]*?<\/function_calls>/g, "")
+        .replace(/<function_result>[\s\S]*?<\/function_result>/g, "")
+        .replace(/<invoke[\s\S]*?<\/invoke>/g, "")
+        .replace(/<parameter[\s\S]*?<\/parameter>/g, "")
+        .replace(/<[\s\S]*?<\/antml:[^>]+>/g, "")
+        .replace(/<result>[\s\S]*?<\/result>/g, "")
+        .trim();
+      const { cleanText, actions } = parseActions(cleaned);
+      if (cleanText !== accumulated) {
+        const final = cleanText;
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last && last.role === "agent") {
+            updated[updated.length - 1] = { role: "agent", content: [final] };
+          }
+          return updated;
+        });
+      }
+
+      // Execute actions
+      for (const action of actions) {
+        onAgentAction?.(action);
       }
     } catch {
-      // Backend down — use mock fallback
-      if (isBuyMessage(message)) {
-        streamSteps(fallbackPipelineSteps);
-      } else {
-        setMessages((prev) => [...prev, { role: "agent", content: ["Backend is offline. Using demo mode.\n\nI can simulate trades for you — try saying \"buy $50 of PEPE\"."] }]);
-      }
+      // API failed — show friendly error
+      setMessages((prev) => [
+        ...prev,
+        { role: "agent", content: ["Hmm, I'm having trouble connecting right now. Try again in a sec!"] },
+      ]);
     }
+
+    setIsTyping(false);
+
+    // Refresh balance after every agent response (catches post-trade balance changes)
+    onBalanceRefresh?.();
   };
 
   const handleSend = () => {
     const trimmed = input.trim();
-    if (!trimmed || sendingRef.current) return;
+    if (!trimmed || sendingRef.current || isTyping) return;
 
     sendingRef.current = true;
 
     if (!hasStartedChat) setHasStartedChat(true);
 
-    setMessages((prev) => [...prev, { role: "user", content: [trimmed] }]);
+    const newMessages: Message[] = [...messages, { role: "user", content: [trimmed] }];
+    setMessages(newMessages);
     setInput("");
 
-    sendToBackend(trimmed);
+    sendToAPI(newMessages);
 
     setTimeout(() => { sendingRef.current = false; }, 100);
   };
@@ -226,7 +338,7 @@ export default function RightPanel({
                           } ${(isSuccess || isBlocked || isPortfolio) && isLast ? "font-medium text-sm" : ""}`}
                           style={{ whiteSpace: "pre-wrap" }}
                         >
-                          {step}
+                          {step.includes("**") ? renderMarkdown(step) : step}
                         </div>
                       );
                     })}
@@ -234,6 +346,17 @@ export default function RightPanel({
                 )}
               </div>
             ))}
+
+            {/* Typing indicator */}
+            {isTyping && messages[messages.length - 1]?.content[0] === "" && (
+              <div className="flex justify-start">
+                <div className="bg-bg-card border border-border rounded-xl rounded-bl-sm px-3.5 py-2.5 flex items-center gap-1.5">
+                  <Loader2 size={12} className="text-accent animate-spin" />
+                  <span className="text-text-secondary text-xs">Testie is typing...</span>
+                </div>
+              </div>
+            )}
+
             <div ref={bottomRef} />
           </div>
 
@@ -245,10 +368,12 @@ export default function RightPanel({
                 onKeyDown={(e) => e.key === "Enter" && handleSend()}
                 placeholder="Message your agent..."
                 className="flex-1 bg-transparent text-white text-sm py-2 outline-none placeholder:text-text-secondary"
+                disabled={isTyping}
               />
               <button
                 onClick={handleSend}
-                className="p-1.5 text-accent hover:text-white transition-colors"
+                disabled={isTyping}
+                className="p-1.5 text-accent hover:text-white transition-colors disabled:opacity-40"
               >
                 <Send size={16} />
               </button>
